@@ -32,3 +32,23 @@ htmlcov/
 !PUBLISH*.md
 !/LICENSE*
 !LICENSE
+
+# IDEs and Tools
+.gemini/
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+
+# Local Configuration
+config.yaml
+docker-compose.yml
+
+# Build & Temporary
+node_modules/
+mcp_requests.json
+graph_debug.log
+*.tmp
+shim.js
+nginx/

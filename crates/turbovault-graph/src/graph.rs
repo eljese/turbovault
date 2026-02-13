@@ -3,7 +3,7 @@
 use petgraph::algo::kosaraju_scc;
 use petgraph::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use turbovault_core::prelude::*;
 
 /// Node index type for graph
@@ -120,33 +120,72 @@ impl LinkGraph {
     fn resolve_link(&self, target: &str) -> Option<NodeIndex> {
         // Remove block/heading references
         let clean_target = target.split('#').next()?.trim();
+        
+        // Normalize target: replace \ with / and remove leading/trailing /
+        let normalized_target = clean_target.replace('\\', "/").trim_matches('/').to_string();
 
-        // Try direct stem match
-        if let Some(&idx) = self.file_index.get(clean_target) {
-            return Some(idx);
-        }
-
-        // Try alias match
-        if let Some(&idx) = self.alias_index.get(clean_target) {
+        // Try direct stem match first (fastest)
+        // This handles links like [[Note]]
+        if let Some(&idx) = self.file_index.get(&normalized_target) {
             return Some(idx);
         }
 
         // Try path-like match (folder/Note)
-        let target_parts: Vec<&str> = clean_target.split('/').filter(|p| !p.is_empty()).collect();
+        let target_parts: Vec<&str> = normalized_target.split('/').filter(|p| !p.is_empty()).collect();
         if target_parts.is_empty() {
             return None;
         }
 
-        // Find file path that matches the tail of the target path
+        // Search through all paths in the index
         for (path, &idx) in self.path_index.iter() {
-            let path_parts: Vec<&str> = path.iter().filter_map(|p| p.to_str()).collect();
+            // Get path parts as strings, excluding root/prefix
+            let path_parts: Vec<&str> = path.components()
+                .filter_map(|c| match c {
+                    std::path::Component::Normal(s) => s.to_str(),
+                    _ => None,
+                })
+                .collect();
 
             if path_parts.len() >= target_parts.len() {
+                // Compare from the end of the path
                 let start = path_parts.len() - target_parts.len();
-                if path_parts[start..] == target_parts[..] {
+                let actual_tail = &path_parts[start..];
+
+                let mut matches = true;
+                for i in 0..target_parts.len() {
+                    let t_part = target_parts[i];
+                    let a_part = actual_tail[i];
+
+                    if i == target_parts.len() - 1 {
+                        // Last part: compare stem (ignore .md or other extensions)
+                        let a_stem = Path::new(a_part)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(a_part);
+                        
+                        // Match if stem matches or full name matches (in case target had extension)
+                        if a_stem != t_part && a_part != t_part {
+                            matches = false;
+                            break;
+                        }
+                    } else {
+                        // Intermediate folder part: must match exactly
+                        if a_part != t_part {
+                            matches = false;
+                            break;
+                        }
+                    }
+                }
+
+                if matches {
                     return Some(idx);
                 }
             }
+        }
+
+        // Final fallback: try alias match
+        if let Some(&idx) = self.alias_index.get(&normalized_target) {
+            return Some(idx);
         }
 
         None
@@ -315,7 +354,7 @@ impl LinkGraph {
 
     /// Get outgoing links from a file (just the Link objects)
     pub fn outgoing_links(&self, path: &PathBuf) -> Result<Vec<Link>> {
-        if let Some(&source_idx) = self.path_index.get(path) {
+        if let Some(&source_idx) = self.path_index.get(source_path) {
             let links: Vec<Link> = self
                 .graph
                 .edges(source_idx)
