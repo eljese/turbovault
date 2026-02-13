@@ -354,7 +354,7 @@ impl LinkGraph {
 
     /// Get outgoing links from a file (just the Link objects)
     pub fn outgoing_links(&self, path: &PathBuf) -> Result<Vec<Link>> {
-        if let Some(&source_idx) = self.path_index.get(source_path) {
+        if let Some(&source_idx) = self.path_index.get(path) {
             let links: Vec<Link> = self
                 .graph
                 .edges(source_idx)
