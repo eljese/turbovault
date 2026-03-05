@@ -204,7 +204,7 @@ impl Default for ObsidianMcpServer {
     }
 }
 
-#[turbomcp::server(name = "obsidian-vault", version = "1.2.6")]
+#[turbomcp::server(name = "obsidian-vault", version = "1.2.7")]
 impl ObsidianMcpServer {
     /// Get a vault manager for the currently active vault (cached)
     async fn get_active_vault_manager(&self) -> McpResult<Arc<VaultManager>> {
