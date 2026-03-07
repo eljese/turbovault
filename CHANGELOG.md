@@ -5,6 +5,30 @@ All notable changes to TurboVault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.7] - 2026-03-04
+
+### Changed
+
+- **Upgraded TurboMCP to v3.0.0**: Full migration to TurboMCP v3 with `TelemetryConfig`-based observability, `#[turbomcp::server]` macro, and `McpHandlerExt` transport abstraction
+- **Standardized response serialization**: All tools now use `StandardResponse::to_json()` consistently instead of mixed serialization patterns
+- **Removed stale workspace dependencies**: Dropped unused `opentelemetry`, `tracing-opentelemetry`, and `opentelemetry-otlp` workspace deps (v0.28) that were superseded by turbomcp-telemetry (v0.31)
+
+### Added
+
+- **Cross-platform prebuilt binaries**: Release workflow now builds binaries for 7 targets (Linux glibc/musl x86_64/ARM64, macOS x86_64/ARM64, Windows x86_64) with macOS code signing/notarization, SHA256 checksums, and GitHub Releases
+- **CI workflow modernized**: Bumped to `actions/checkout@v5`, stable Rust toolchain, `CARGO_TERM_COLOR`
+
+### Fixed
+
+- **Stale cache on external file modifications**: `read_note` now validates cache entries against the file's modification time on disk, so externally modified files (git sync, direct writes, other processes) are always read fresh instead of serving stale/empty cached content (fixes #5)
+- **Server version mismatch**: MCP server macro now correctly advertises the current crate version to clients (was hardcoded to 1.1.6)
+- **Repository metadata on crates.io**: All 8 workspace crates now set `repository.workspace = true`, so every crate on crates.io links back to the GitHub repo (fixes #4)
+- **Removed unused variable** in `explain_vault` tool
+
+### Improved
+
+- **`get_hub_notes` now accepts `top_n` parameter**: Previously hardcoded to 10, now configurable with `top_n: Option<usize>` (default 10)
+
 ## [1.2.6] - 2025-12-16
 
 ### Added
@@ -114,6 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Atomic file operations with rollback support
 - Configuration profiles (development, production, readonly, high-performance)
 
+[1.2.7]: https://github.com/epistates/turbovault/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/epistates/turbovault/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/epistates/turbovault/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/epistates/turbovault/compare/v1.2.3...v1.2.4

@@ -12,7 +12,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.2.6"
+version = "1.2.7"
 edition = "2024"
 rust-version = "1.90.0"
 authors = ["Epistates, Inc <nick@epistates.com>"]
@@ -42,9 +42,6 @@ pulldown-cmark = "0.13"      # CommonMark parser with OFM extensions (headings, 
 # Observability & Diagnostics
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
-opentelemetry = "0.28"
-tracing-opentelemetry = "0.28"
-opentelemetry-otlp = { version = "0.28", features = ["tonic"] }
 
 # Data structures & algorithms
 petgraph = "0.6"             # 2.1M+ downloads, ecosystem standard for graphs
@@ -97,14 +94,14 @@ path_trav = "2"           # Path traversal detection - security-focused
 # sonic-rs = "0.3"         # Fastest JSON parser, deferred optimization
 
 # Workspace crates
-turbovault-core = { version = "1.2.6", path = "crates/turbovault-core" }
-turbovault-parser = { version = "1.2.6", path = "crates/turbovault-parser" }
-turbovault-graph = { version = "1.2.6", path = "crates/turbovault-graph" }
-turbovault-vault = { version = "1.2.6", path = "crates/turbovault-vault" }
-turbovault-batch = { version = "1.2.6", path = "crates/turbovault-batch" }
-turbovault-export = { version = "1.2.6", path = "crates/turbovault-export" }
-turbovault-tools = { version = "1.2.6", path = "crates/turbovault-tools" }
-turbovault = { version = "1.2.6", path = "crates/turbovault" }
+turbovault-core = { version = "1.2.7", path = "crates/turbovault-core" }
+turbovault-parser = { version = "1.2.7", path = "crates/turbovault-parser" }
+turbovault-graph = { version = "1.2.7", path = "crates/turbovault-graph" }
+turbovault-vault = { version = "1.2.7", path = "crates/turbovault-vault" }
+turbovault-batch = { version = "1.2.7", path = "crates/turbovault-batch" }
+turbovault-export = { version = "1.2.7", path = "crates/turbovault-export" }
+turbovault-tools = { version = "1.2.7", path = "crates/turbovault-tools" }
+turbovault = { version = "1.2.7", path = "crates/turbovault" }
 
 [profile.release]
 opt-level = 3

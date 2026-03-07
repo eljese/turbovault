@@ -204,11 +204,7 @@ impl Default for ObsidianMcpServer {
     }
 }
 
-#[turbomcp::server(
-    name = "obsidian-vault",
-    version = "1.1.6",
-    transports = ["stdio", "http", "websocket", "tcp", "unix"]
-)]
+#[turbomcp::server(name = "obsidian-vault", version = "1.2.7")]
 impl ObsidianMcpServer {
     /// Get a vault manager for the currently active vault (cached)
     async fn get_active_vault_manager(&self) -> McpResult<Arc<VaultManager>> {
@@ -328,7 +324,7 @@ impl ObsidianMcpServer {
                 "note": "Use MCP resources if supported by client, otherwise use tools as fallback",
                 "key_features": [
                     "Wikilinks: [[note]] and [[note|alias]]",
-                    "Embeds: ![[image.png]] and ![[note#section]]",
+                    "Embeds: ![[image.png]] and ![[noteection]]",
                     "Block refs: [[note#^block-id]] and ^block-id",
                     "Callouts: > [!note] Title",
                     "Highlights: ==text==",
@@ -530,13 +526,13 @@ impl ObsidianMcpServer {
                 .with_next_step("get_forward_links")
                 .with_next_step("get_related_notes");
 
-        if count == 0 {
-            let response = response.with_warning("Note has no incoming links".to_string());
-            serde_json::to_value(response)
+        let response = if count == 0 {
+            response.with_warning("Note has no incoming links".to_string())
         } else {
-            serde_json::to_value(response)
-        }
-        .map_err(|e| McpError::internal(e.to_string()))
+            response
+        };
+
+        response.to_json()
     }
 
     /// Find all notes that this note links to
@@ -605,10 +601,11 @@ impl ObsidianMcpServer {
         related = ["get_centrality_ranking", "get_dead_end_notes", "explain_vault"],
         examples = []
     )]
-    async fn get_hub_notes(&self) -> McpResult<serde_json::Value> {
+    async fn get_hub_notes(&self, top_n: Option<usize>) -> McpResult<serde_json::Value> {
+        let top_n = top_n.unwrap_or(10);
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = GraphTools::new(manager);
-        let hubs = tools.get_hub_notes(10).await.map_err(to_mcp_error)?;
+        let hubs = tools.get_hub_notes(top_n).await.map_err(to_mcp_error)?;
 
         let count = hubs.len();
         let response = StandardResponse::new(
@@ -802,7 +799,6 @@ impl ObsidianMcpServer {
     )]
     async fn explain_vault(&self) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
-        let _file_tools = FileTools::new(manager.clone());
         let graph_tools = GraphTools::new(manager.clone());
         let analysis_tools = AnalysisTools::new(manager.clone());
 
@@ -1141,8 +1137,7 @@ impl ObsidianMcpServer {
         .with_next_step("add_vault")
         .with_next_step("set_active_vault");
 
-        serde_json::to_value(response)
-            .map_err(|e| McpError::internal(format!("Failed to serialize response: {}", e)))
+        response.to_json()
     }
 
     /// Add an existing vault (automatically initializes it for better DX)
@@ -1211,8 +1206,7 @@ impl ObsidianMcpServer {
             // Not a fatal error - continue anyway
         }
 
-        serde_json::to_value(response)
-            .map_err(|e| McpError::internal(format!("Failed to serialize response: {}", e)))
+        response.to_json()
     }
 
     /// Remove a vault from registration
@@ -1266,8 +1260,7 @@ impl ObsidianMcpServer {
         )
         .with_count(count);
 
-        serde_json::to_value(response)
-            .map_err(|e| McpError::internal(format!("Failed to serialize response: {}", e)))
+        response.to_json()
     }
 
     /// Get configuration for a specific vault
@@ -1289,8 +1282,7 @@ impl ObsidianMcpServer {
         )
         .with_next_step("set_active_vault");
 
-        serde_json::to_value(response)
-            .map_err(|e| McpError::internal(format!("Failed to serialize response: {}", e)))
+        response.to_json()
     }
 
     /// Set the active vault
@@ -1397,8 +1389,7 @@ impl ObsidianMcpServer {
         .with_meta("transactional", serde_json::json!(true))
         .with_next_step("quick_health_check");
 
-        serde_json::to_value(response)
-            .map_err(|e| McpError::internal(format!("Failed to serialize batch result: {}", e)))
+        response.to_json()
     }
 
     // ==================== Export Operations ====================
@@ -1606,8 +1597,7 @@ impl ObsidianMcpServer {
             .with_count(count)
             .with_meta("limit", serde_json::json!(limit));
 
-        serde_json::to_value(response)
-            .map_err(|e| McpError::internal(format!("Failed to serialize suggestions: {}", e)))
+        response.to_json()
     }
 
     /// Get link strength between two files
@@ -1672,27 +1662,38 @@ impl ObsidianMcpServer {
                 serde_json::json!(["betweenness", "closeness", "eigenvector"]),
             );
 
-        serde_json::to_value(response)
-            .map_err(|e| McpError::internal(format!("Failed to serialize ranking: {}", e)))
+        response.to_json()
     }
 
     // ==================== Resources (OFM Knowledge Injection) ====================
 
     /// Complete Obsidian Flavored Markdown syntax guide
     #[resource("obsidian://syntax/complete-guide")]
-    async fn ofm_complete_guide_resource(&self) -> McpResult<String> {
+    async fn ofm_complete_guide_resource(
+        &self,
+        _uri: String,
+        _ctx: &RequestContext,
+    ) -> McpResult<String> {
         Ok(crate::resources::OFM_SYNTAX_GUIDE.to_string())
     }
 
     /// Quick reference for Obsidian Flavored Markdown
     #[resource("obsidian://syntax/quick-ref")]
-    async fn ofm_quick_reference_resource(&self) -> McpResult<String> {
+    async fn ofm_quick_reference_resource(
+        &self,
+        _uri: String,
+        _ctx: &RequestContext,
+    ) -> McpResult<String> {
         Ok(crate::resources::OFM_QUICK_REFERENCE.to_string())
     }
 
     /// Example note demonstrating all OFM features
     #[resource("obsidian://examples/sample-note")]
-    async fn ofm_example_note_resource(&self) -> McpResult<String> {
+    async fn ofm_example_note_resource(
+        &self,
+        _uri: String,
+        _ctx: &RequestContext,
+    ) -> McpResult<String> {
         Ok(crate::resources::OFM_EXAMPLE_NOTE.to_string())
     }
 

@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 publish = true
 description = "Reporting and export utilities for TurboVault Server"
 documentation = "https://docs.rs/turbovault-export"

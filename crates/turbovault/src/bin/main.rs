@@ -2,7 +2,8 @@
 
 use clap::Parser;
 use std::path::PathBuf;
-use turbomcp_server::observability::ObservabilityConfig;
+use turbomcp::McpHandlerExt;
+use turbomcp::telemetry::TelemetryConfig;
 use turbovault::ObsidianMcpServer;
 use turbovault_core::VaultConfig;
 use turbovault_core::cache::VaultCache;
@@ -63,16 +64,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // HTTP/WebSocket/TCP: Can use human-readable stdout logging
     let _observability_guard = if args.transport == "stdio" {
         // STDIO: Use TurboMCP's structured observability (JSON to stderr)
-        let obs_config = ObservabilityConfig::default()
-            .with_service_name("turbovault")
-            .with_service_version(env!("CARGO_PKG_VERSION"))
-            .with_log_level(if args.profile == "production" {
+        let obs_config = TelemetryConfig::builder()
+            .service_name("turbovault")
+            .service_version(env!("CARGO_PKG_VERSION"))
+            .log_level(if args.profile == "production" {
                 "info,turbo_vault=debug".to_string()
             } else {
                 "debug".to_string()
             })
-            .enable_security_auditing()
-            .enable_performance_monitoring();
+            .json_logs(true)
+            .stderr_output(true)
+            .build();
 
         Some(obs_config.init()?)
     } else {
@@ -82,16 +84,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match output_format {
             OutputFormat::Json => {
                 // JSON format for programmatic parsing
-                let obs_config = ObservabilityConfig::default()
-                    .with_service_name("turbovault")
-                    .with_service_version(env!("CARGO_PKG_VERSION"))
-                    .with_log_level(if args.profile == "production" {
+                let obs_config = TelemetryConfig::builder()
+                    .service_name("turbovault")
+                    .service_version(env!("CARGO_PKG_VERSION"))
+                    .log_level(if args.profile == "production" {
                         "info,turbo_vault=debug".to_string()
                     } else {
                         "debug".to_string()
                     })
-                    .enable_security_auditing()
-                    .enable_performance_monitoring();
+                    .json_logs(true)
+                    .stderr_output(false) // HTTP/WS can use stdout
+                    .build();
                 Some(obs_config.init()?)
             }
             OutputFormat::Human | OutputFormat::Text => {

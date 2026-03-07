@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 publish = true
 description = "MCP tools implementation using turbomcp"
 documentation = "https://docs.rs/turbovault-tools"
@@ -20,7 +21,7 @@ turbovault-export = { workspace = true }
 # MCP server framework
 # Note: No features needed here - tools crate only defines tool implementations
 # Transport features are handled by the main turbovault binary
-turbomcp = { version = "2.3.3" }
+turbomcp = { version = "3.0.0" }
 
 tokio = { workspace = true }
 serde = { workspace = true }

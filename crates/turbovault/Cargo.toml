@@ -5,10 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 publish = true
 description = "Production-grade MCP server for Obsidian vault management - Transform your vault into an intelligent knowledge system for AI agents"
-repository = "https://github.com/epistates/turbovault"
-homepage = "https://github.com/epistates/turbovault"
 documentation = "https://docs.rs/turbovault"
 readme = "README.md"
 keywords = ["mcp", "obsidian", "vault", "llm", "agent"]
@@ -53,8 +53,8 @@ turbovault-vault = { workspace = true }
 turbovault-tools = { workspace = true }
 
 # MCP server framework (features passed through from turbovault)
-turbomcp = { version = "2.3.3" }
-turbomcp-server = { version = "2.3.3" }
+turbomcp = { version = "3.0.0", features = ["telemetry"] }
+turbomcp-server = { version = "3.0.0" }
 
 tokio = { workspace = true }
 serde = { workspace = true }

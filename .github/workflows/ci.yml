@@ -6,22 +6,22 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install Rust 1.90.0
-        uses: dtolnay/rust-toolchain@v1
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.90.0
           components: rustfmt, clippy
 
-      - name: Cache cargo build artifacts
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
-          key: ci-rust-1.90
+          key: ci
 
       - name: Check formatting
         run: cargo fmt --all --check
