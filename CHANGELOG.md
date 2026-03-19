@@ -5,13 +5,15 @@ All notable changes to TurboVault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.8] - 2026-03-12
+## [1.2.8] - 2026-03-19
 
 ### Added
 
 - **`get_notes_info` tool**: Bulk note metadata retrieval — returns `exists`, `size_bytes`, `modified_at`, and `has_frontmatter` for a list of paths without reading full file content, enabling efficient batch filesystem inspection.
 - **`write_file_with_mode` tool**: Append and prepend support for file writes. Accepts a `mode` parameter (`overwrite`, `append`, `prepend`) and correctly handles frontmatter boundaries when prepending to YAML-frontmatter files.
 - **Cross-filesystem move support**: `move_file` now handles `CrossesDevices` errors by falling back to a copy-then-delete strategy, maintaining atomicity guarantees across filesystem boundaries.
+- **`AnalysisConfig` for health analysis**: Configurable `hub_notes_limit` (default 10) replaces the previously hardcoded cap of 5 in `HealthAnalyzer::analyze()`.
+- **`LinkGraph::unresolved_link_count()` helper**: Convenience method returning the total count of unresolved links across all source files.
 
 ### Changed
 
@@ -19,9 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`resolve_path` is now `pub`**: `VaultManager::resolve_path` is now publicly visible so tool layers (`FileTools`, `DataTools`) can reuse the battle-tested `path_trav`-backed security check without duplicating logic.
 - **`read_file` always reads from disk**: Removed the in-memory `VaultFile` cache path from `read_file` — the cache stores parsed content with frontmatter stripped, so bypassing it ensures callers always receive the complete raw file including frontmatter.
 - **Updated installation instructions and usage documentation in README**: Clarified TurboVault as both a Rust SDK and an MCP server with two distinct usage modes.
+- **Two-pass vault initialization**: `VaultManager::initialize()` now adds all files to the graph index first, then resolves links in a second pass. This eliminates scan-order-dependent resolution failures where files scanned later were not in the index when earlier files resolved links to them.
+- **Case-insensitive link resolution**: `LinkGraph::resolve_link` now lowercases all index keys at insertion and lookup time, matching Obsidian's case-insensitive wikilink behaviour.
+- **`file_index` and `alias_index` handle stem collisions**: Changed from single-value to multi-value maps (`HashMap<String, Vec<NodeIndex>>`), so files with the same lowercased stem on case-sensitive filesystems are all indexed rather than silently overwriting each other.
+- **Health score uses saturating arithmetic**: `HealthReport::calculate_score` now uses `saturating_sub` to prevent `u8` underflow when penalty values are large.
+- **Updated TurboMCP to v3.0.6** and all workspace dependencies to latest compatible versions.
 
 ### Fixed
 
+- **Broken link detection was non-functional**: `get_broken_links`, `quick_health_check`, and `full_health_analysis` always reported zero broken links because `HealthAnalyzer::new()` (graph-only mode) was used but unresolved links never entered the graph. Unresolved links are now tracked in `LinkGraph.unresolved_links` and wired into `HealthAnalyzer::with_files()`. (PR #6 by @AntttMan)
+- **Petgraph swap-remove index corruption**: `remove_file` now correctly updates `path_index`, `file_index`, and `alias_index` after `remove_node`, which uses swap-remove internally and moves the last node into the removed slot. Previously, all external index maps for the swapped node became stale, causing wrong edges, self-loops, or panics on subsequent operations.
+- **Path-suffix fallback ignored `.md` extension**: The `resolve_link` path-suffix fallback (for `[[folder/Note]]`-style wikilinks) now strips `.md` from path components before comparison, so multi-segment wikilinks without extensions resolve correctly.
+- **Duplicate alias accumulation on re-add**: `add_file` called repeatedly (e.g. on every `write_file`) no longer pushes duplicate entries to `alias_index`.
 - **Path traversal protection unified**: `delete_file`, `move_file`, `copy_file`, and `get_notes_info` now all go through `VaultManager::resolve_path` (backed by the `path_trav` crate) instead of ad-hoc `starts_with` checks, closing potential bypass vectors.
 - **Stale `#[allow(dead_code)]` annotations**: `is_cache_expired` and `is_file_modified_since` are kept for future use and annotated with `#[allow(dead_code)]` to silence compiler warnings.
 
