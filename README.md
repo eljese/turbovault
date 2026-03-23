@@ -5,24 +5,45 @@
 [![License](https://img.shields.io/crates/l/turbovault.svg)](https://github.com/epistates/turbovault/blob/main/LICENSE)
 [![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](https://www.rust-lang.org/)
 
-**A production-grade MCP server that transforms your Obsidian vault into an intelligent knowledge system powered by AI.**
+**The ultimate Rust SDK and high-performance MCP server for Obsidian-flavored Markdown (.ofm) and standard .md vaults.**
 
-TurboVault provides Claude and other AI agents with **44 specialized tools** for reading, writing, searching, analyzing, and managing your notes—all with sub-100ms performance for most operations. Built in Rust for speed, safety, and reliability.
+TurboVault is a dual-purpose toolkit designed for both developers and users. It provides a robust, modular **Rust SDK** for building applications that consume markdown directories, and a **full-featured MCP server** that works out of the box with Claude and other AI agents.
 
-## Core Crates
+---
 
-TurboVault is a modular system composed of specialized crates. The main entry point is **[turbovault](https://crates.io/crates/turbovault)** which orchestrates all functionality:
+## Two Ways to Use TurboVault
+
+### 1. As a Rust SDK (For Developers)
+Build your own applications, search engines, or custom MCP servers using our modular crates. TurboVault handles the heavy lifting of parsing `.md` and `.ofm` files, building knowledge graphs, and managing multi-vault environments.
+
+- **Modular Architecture**: Use only what you need (Parser, Graph, Search, etc.).
+- **High Performance**: Sub-100ms operations for most tasks.
+- **Extensible**: Easily build your own specialized MCP servers on top of our core logic.
+- **SOTA Standards**: Fully supports Obsidian-flavored Markdown (wikilinks, embeds, callouts).
+
+### 2. As a Ready-to-Use MCP Server (For Users)
+Transform your Obsidian vault into an intelligent knowledge system immediately. Connect TurboVault to Claude Desktop or any MCP-compatible client to gain **44 specialized tools** for your notes.
+
+- **Zero Coding Required**: Install the binary and point it at your vault.
+- **44+ Specialized Tools**: Searching, link analysis, health checks, and more.
+- **Multi-Vault Support**: Switch between personal and work notes seamlessly at runtime.
+
+---
+
+## Core Crates (The SDK)
+
+TurboVault is a modular system composed of specialized crates. You can depend on individual components to build your own tools:
 
 | Crate | Purpose | Docs |
 |-------|---------|------|
-| **[turbovault](crates/turbovault)** | Main MCP server binary | [![Docs.rs](https://docs.rs/turbovault/badge.svg)](https://docs.rs/turbovault) |
-| **[turbovault-tools](crates/turbovault-tools)** | MCP tools implementation | [![Docs.rs](https://docs.rs/turbovault-tools/badge.svg)](https://docs.rs/turbovault-tools) |
-| **[turbovault-core](crates/turbovault-core)** | Core models & types | [![Docs.rs](https://docs.rs/turbovault-core/badge.svg)](https://docs.rs/turbovault-core) |
-| **[turbovault-vault](crates/turbovault-vault)** | Vault management & I/O | [![Docs.rs](https://docs.rs/turbovault-vault/badge.svg)](https://docs.rs/turbovault-vault) |
-| **[turbovault-parser](crates/turbovault-parser)** | OFM parser | [![Docs.rs](https://docs.rs/turbovault-parser/badge.svg)](https://docs.rs/turbovault-parser) |
-| **[turbovault-graph](crates/turbovault-graph)** | Link graph analysis | [![Docs.rs](https://docs.rs/turbovault-graph/badge.svg)](https://docs.rs/turbovault-graph) |
-| **[turbovault-batch](crates/turbovault-batch)** | Batch operations | [![Docs.rs](https://docs.rs/turbovault-batch/badge.svg)](https://docs.rs/turbovault-batch) |
-| **[turbovault-export](crates/turbovault-export)** | Export & reporting | [![Docs.rs](https://docs.rs/turbovault-export/badge.svg)](https://docs.rs/turbovault-export) |
+| **[turbovault-core](crates/turbovault-core)** | Core models, MultiVault management & types | [![Docs.rs](https://docs.rs/turbovault-core/badge.svg)](https://docs.rs/turbovault-core) |
+| **[turbovault-parser](crates/turbovault-parser)** | High-speed .md & .ofm parser | [![Docs.rs](https://docs.rs/turbovault-parser/badge.svg)](https://docs.rs/turbovault-parser) |
+| **[turbovault-graph](crates/turbovault-graph)** | Link graph analysis & relationship discovery | [![Docs.rs](https://docs.rs/turbovault-graph/badge.svg)](https://docs.rs/turbovault-graph) |
+| **[turbovault-vault](crates/turbovault-vault)** | Vault management, file I/O & atomic writes | [![Docs.rs](https://docs.rs/turbovault-vault/badge.svg)](https://docs.rs/turbovault-vault) |
+| **[turbovault-tools](crates/turbovault-tools)** | 44+ MCP tool implementations | [![Docs.rs](https://docs.rs/turbovault-tools/badge.svg)](https://docs.rs/turbovault-tools) |
+| **[turbovault-batch](crates/turbovault-batch)** | Atomic batch operations | [![Docs.rs](https://docs.rs/turbovault-batch/badge.svg)](https://docs.rs/turbovault-batch) |
+| **[turbovault-export](crates/turbovault-export)** | Export & reporting (JSON/CSV/MD) | [![Docs.rs](https://docs.rs/turbovault-export/badge.svg)](https://docs.rs/turbovault-export) |
+| **[turbovault](crates/turbovault)** | Main MCP server binary / SDK orchestrator | [![Docs.rs](https://docs.rs/turbovault/badge.svg)](https://docs.rs/turbovault) |
 
 ## Why TurboVault?
 
@@ -51,7 +72,7 @@ This means TurboVault gets battle-tested reliability and extensibility out of th
 
 ### Installation
 
-**From crates.io (after publishing):**
+**From crates.io**
 
 ```bash
 # Minimal install (7.0 MB, STDIO only - perfect for Claude Desktop)
@@ -134,37 +155,37 @@ Claude: [Uses get_hub_notes() to find key concepts]
 ### Search & Discovery
 ```
 You: "Find all notes about async Rust and show how they connect"
-Claude: search() → recommend_related() → get_related_notes() → explain relationships
+Claude: search() -> recommend_related() -> get_related_notes() -> explain relationships
 ```
 
 ### Vault Intelligence
 ```
 You: "What's the health of my vault? Any issues I should fix?"
-Claude: quick_health_check() → full_health_analysis() → get_broken_links() → generate fixes
+Claude: quick_health_check() -> full_health_analysis() -> get_broken_links() -> generate fixes
 ```
 
 ### Knowledge Graph Navigation
 ```
 You: "What are my most important notes? Which ones are isolated?"
-Claude: get_hub_notes() → get_isolated_clusters() → suggest connections
+Claude: get_hub_notes() -> get_isolated_clusters() -> suggest connections
 ```
 
 ### Structured Note Creation
 ```
 You: "Create a project note for the TurboVault launch with status tracking"
-Claude: list_templates() → create_from_template() → write auto-formatted note
+Claude: list_templates() -> create_from_template() -> write auto-formatted note
 ```
 
 ### Batch Content Operations
 ```
 You: "Move my 'MLOps' note to 'AI/Operations' and update all links"
-Claude: move_note() + batch operations → atomic multi-file update
+Claude: move_note() + batch operations -> atomic multi-file update
 ```
 
 ### Link Suggestions
 ```
 You: "Based on my vault, what notes should I link this to?"
-Claude: suggest_links() → get_link_strength() → recommend cross-references
+Claude: suggest_links() -> get_link_strength() -> recommend cross-references
 ```
 
 ## 44 MCP Tools Organized by Category
@@ -328,62 +349,51 @@ suggestions = client.call("suggest_links", {"path": "AI/ML.md"})
 | `readonly` | Read-only access for safe exploration |
 | `high-performance` | Large vaults (10k+ notes) with aggressive caching |
 
-## Dual-Use: Library and Server
+## SDK and Server Implementation
 
-TurboVault is both a **Rust library** and a **standalone MCP server**:
+TurboVault is designed for two primary audiences: developers building on top of the **Rust SDK** and users looking for a **standalone MCP server**.
 
 ### As a Standalone MCP Server
 
-Build the optimized binary (LTO + fat codegen for maximum performance):
+The quickest way to get started is using the pre-built binary. It's fully self-contained and optimized for performance:
+- **Link-time optimization** (LTO) for maximum speed
+- **Configurable transports** (STDIO, HTTP, WebSocket, TCP)
+- **Zero external dependencies** (just point it at your vault)
 
 ```bash
-git clone https://github.com/epistates/turbovault.git
-cd turbovault
-cargo build --release
-```
-
-**Or build with specific transports only:**
-
-```bash
-# STDIO only (MCP standard, smallest binary)
-cargo build --release --no-default-features
-
-# HTTP transport only
-cargo build --release --no-default-features --features http
-
-# WebSocket + Unix socket
-cargo build --release --no-default-features --features "websocket,unix"
-
-# All transports (default)
+# Build the optimized binary
 cargo build --release --features full
-```
 
-Then run it:
-
-```bash
+# Run it
 ./target/release/turbovault --vault /path/to/vault --profile production
 ```
 
-The binary is fully self-contained with:
-- **Link-time optimization** (LTO) for maximum performance
-- **Full stripping** (no debug symbols)
-- **Single codegen unit** for optimal runtime speed
-- **Configurable transports** — Build only what you need for smaller binaries
+### As a Rust SDK (Library)
 
-Now Claude (via Claude Desktop) can use all 44 tools.
+The core of TurboVault is a collection of modular crates. Use them to build your own search engines, knowledge management tools, or even **your own specialized MCP servers**.
 
-### As a Rust Library
 ```rust
 // Use in your own Rust projects
 use turbovault_core::MultiVaultManager;
 use turbovault_vault::VaultManager;
 use turbovault_tools::SearchEngine;
 
-// Build custom applications on top of turbovault
-let manager = MultiVaultManager::new();
-manager.add_vault("notes", "/home/user/notes").await?;
-let vault = manager.get_vault("notes")?;
-let results = vault.search("machine learning")?;
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // 1. Initialize the MultiVault manager
+    let manager = MultiVaultManager::new();
+    
+    // 2. Add and initialize a vault (scans files, builds graph)
+    manager.add_vault("notes", "/home/user/notes").await?;
+    
+    // 3. Perform high-level operations
+    let vault = manager.get_vault("notes")?;
+    let results = vault.search("machine learning")?;
+    
+    // 4. Use these components to build your own custom MCP server
+    // or integrate into existing Rust applications.
+    Ok(())
+}
 ```
 
 Each crate is published to crates.io, so you can depend on individual components or the full stack.
@@ -470,10 +480,10 @@ make clean       # Clean build artifacts
 ```
 You: "What topics do I have the most notes on?"
 Claude:
-  1. get_hub_notes() → [AI, Project Management, Rust, Python]
+  1. get_hub_notes() -> [AI, Project Management, Rust, Python]
   2. For each hub:
-     - get_related_notes() → related topics
-     - get_backlinks() → importance/connectivity
+     - get_related_notes() -> related topics
+     - get_backlinks() -> importance/connectivity
   3. Report: "Your core topics are AI (23 notes) and Rust (18 notes)"
 ```
 
@@ -482,12 +492,12 @@ Claude:
 ```
 You: "My vault feels disorganized. Help me improve it."
 Claude:
-  1. quick_health_check() → Health: 42/100 ❌
-  2. full_health_analysis() → Issues: 12 broken links, 8 orphaned notes
-  3. get_broken_links() → List of specific broken links
-  4. suggest_links() → AI-powered link recommendations
-  5. batch_execute() → Atomic fixes
-  6. explain_vault() → New health: 78/100 ✅
+  1. quick_health_check() -> Health: 42/100
+  2. full_health_analysis() -> Issues: 12 broken links, 8 orphaned notes
+  3. get_broken_links() -> List of specific broken links
+  4. suggest_links() -> AI-powered link recommendations
+  5. batch_execute() -> Atomic fixes
+  6. explain_vault() -> New health: 78/100
 ```
 
 ### Example 3: Template-Based Content Creation
@@ -495,7 +505,7 @@ Claude:
 ```
 You: "Create project notes for Q4 initiatives"
 Claude:
-  1. list_templates() → "project", "task", "meeting"
+  1. list_templates() -> "project", "task", "meeting"
   2. create_from_template("project", {
        "title": "Q4 Planning",
        "status": "In Progress",
@@ -546,4 +556,4 @@ MIT License - See [LICENSE](LICENSE) for details
 
 ---
 
-**Get started now**: `./target/release/turbovault --profile production` 🚀
+**Get started now**: `./target/release/turbovault --profile production`

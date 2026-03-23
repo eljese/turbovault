@@ -394,7 +394,7 @@ impl TemplateEngine {
         let full_content = format!("{}{}", frontmatter_yaml, content);
 
         self.manager
-            .write_file(Path::new(file_path), &full_content)
+            .write_file(Path::new(file_path), &full_content, None)
             .await?;
 
         Ok(CreatedNoteInfo {

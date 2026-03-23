@@ -167,30 +167,40 @@
 //! See [`turbovault_core::error`] for error types.
 
 pub mod analysis_tools;
+pub mod audit_tools;
 pub mod batch_tools;
+pub mod diff_tools;
+pub mod duplicate_tools;
 pub mod export_tools;
 pub mod file_tools;
 pub mod graph_tools;
 pub mod metadata_tools;
 pub mod output_formatter;
+pub mod quality_tools;
 pub mod relationship_tools;
 pub mod response_utils;
 pub mod search_engine;
 pub mod search_tools;
+pub mod similarity_engine;
 pub mod templates;
 pub mod validation_tools;
 pub mod vault_lifecycle;
 
 pub use analysis_tools::{AnalysisTools, VaultStats};
+pub use audit_tools::AuditTools;
 pub use batch_tools::BatchTools;
+pub use diff_tools::{DiffResult, DiffSummary, DiffTools};
+pub use duplicate_tools::{CompareResult, DuplicateGroup, DuplicateTools};
 pub use export_tools::ExportTools;
-pub use file_tools::FileTools;
+pub use file_tools::{FileTools, NoteInfo, WriteMode, obsidian_uri};
 pub use graph_tools::{BrokenLinkInfo, GraphTools, HealthInfo};
 pub use metadata_tools::MetadataTools;
 pub use output_formatter::{OutputFormat, ResponseFormatter};
+pub use quality_tools::{QualityScore, QualityTools, VaultQualityReport};
 pub use relationship_tools::RelationshipTools;
 pub use search_engine::{SearchEngine, SearchQuery, SearchResultInfo};
 pub use search_tools::SearchTools;
+pub use similarity_engine::{SimilarityEngine, SimilarityResult};
 pub use templates::{TemplateDefinition, TemplateEngine, TemplateFieldType};
 pub use turbovault_batch::{BatchOperation, BatchResult};
 pub use turbovault_core::prelude::*;

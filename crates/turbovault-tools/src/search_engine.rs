@@ -465,7 +465,7 @@ fn extract_keywords(content: &str) -> Vec<String> {
 }
 
 /// Check if word is a common stopword
-fn is_stopword(word: &str) -> bool {
+pub(crate) fn is_stopword(word: &str) -> bool {
     matches!(
         word.to_lowercase().as_str(),
         "the"

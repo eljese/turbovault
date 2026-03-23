@@ -17,6 +17,7 @@ turbovault-graph = { workspace = true }
 turbovault-vault = { workspace = true }
 turbovault-batch = { workspace = true }
 turbovault-export = { workspace = true }
+turbovault-audit = { workspace = true }
 
 # MCP server framework
 # Note: No features needed here - tools crate only defines tool implementations
@@ -26,6 +27,7 @@ turbomcp = { version = "3.0.0" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
@@ -33,6 +35,10 @@ tracing = { workspace = true }
 tempfile = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 shellexpand = { workspace = true }
+urlencoding = "2"
+
+# Diff tools
+similar = { workspace = true }
 
 # Tier 1d: Production-grade full-text search
 tantivy = { workspace = true }

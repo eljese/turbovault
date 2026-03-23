@@ -5,6 +5,84 @@ All notable changes to TurboVault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.9] - 2026-03-22
+
+### Added
+
+- **14 new MCP tools** (44 → 58 total), covering 5 major capability areas:
+
+#### Semantic Similarity Search
+- **`semantic_search`**: Find notes by meaning using TF-IDF cosine similarity — discovers conceptual matches beyond exact keyword overlap, with explainable shared-term reporting
+- **`find_similar_notes`**: Find notes most similar in content to a given note, useful for discovering link candidates and thematic clusters
+
+#### Content Quality Evaluation
+- **`evaluate_note_quality`**: Score individual notes across readability (Flesch-Kincaid), structure (heading hierarchy, frontmatter, tags), completeness (word count, link density), and staleness (modification recency) dimensions
+- **`vault_quality_report`**: Vault-wide quality metrics with score distribution, dimension averages, lowest/highest quality notes, and actionable recommendations
+- **`find_stale_notes`**: Find notes not updated within a configurable threshold, sorted by staleness
+
+#### Operation Audit Trail & Rollback
+- **`audit_log`**: Query operation history with filters by path, operation type (CREATE/UPDATE/DELETE/MOVE), and result limit
+- **`rollback_preview`**: Dry-run preview of what a rollback would change, including unified diff
+- **`rollback_note`**: Restore a note to its state before a specific operation, with the rollback itself recorded in the audit trail
+- **`audit_stats`**: Operation counts by type, total snapshot storage, and time range of recorded operations
+
+#### Duplicate Detection
+- **`find_duplicates`**: Two-stage near-duplicate detection using SimHash fingerprinting for fast candidate filtering followed by TF-IDF cosine similarity verification
+- **`compare_notes`**: Detailed pairwise comparison with similarity score, shared terms, diff summary, and actionable recommendation (merge/link/keep)
+
+#### Note Diff Tools
+- **`diff_notes`**: Line-level and word-level diff between two notes with unified diff output and similarity ratio
+- **`diff_note_version`**: Compare current note content with a previous version from the audit trail
+
+- **New `turbovault-audit` crate**: Append-only JSONL operation log, content-addressed snapshot storage (SHA-256 dedup), and rollback engine with atomic file restoration
+- **Optimistic concurrency control**: `write_note`, `delete_note`, `move_note`, and `move_file` now accept optional `expected_hash` parameter — if the file was modified since the caller's last `read_note`, the write fails with `ConcurrencyError` instead of silently overwriting. Enables safe multi-agent concurrent vault access.
+- **UUID-based temp files**: Concurrent writes to the same file no longer collide on the temp path
+
+### Changed
+
+- **`VaultManager::write_file`** signature now includes `expected_hash: Option<&str>` for optimistic concurrency control. Internal callers pass `None` for backward compatibility.
+- **`VaultManager::delete_file`** and **`VaultManager::move_file`** now handle audit trail recording, link graph cleanup, and optimistic concurrency checking — `FileTools` delegates to these instead of performing raw I/O
+- **`AuditLog` uses `tokio::sync::Mutex`** for write serialization, preventing interleaved JSONL entries from concurrent MCP tool calls
+- **Similarity engine cache invalidation**: All 9 mutating MCP tools (`write_note`, `edit_note`, `delete_note`, `move_note`, `move_file`, `batch_execute`, `update_frontmatter`, `manage_tags`, `create_from_template`) invalidate the cached TF-IDF vectors so subsequent similarity queries reflect current vault state
+
+### Fixed
+
+- **Heading hierarchy validator** now correctly flags documents starting with H2+ (no H1) as invalid, instead of awarding the hierarchy bonus
+- **Diff summary accuracy**: `lines_changed` count now reflects the true number of changed line pairs, not the display-capped count (truncation to 50 inline changes only affects the detail list)
+- **Staleness penalty integer truncation**: `linked_notes_newer` is now clamped before casting to `u8`, preventing silent wrap-around for hub notes with 256+ newer linked notes
+- **`find_duplicates` verification accuracy**: Precise TF-IDF verification now queries the full document set instead of `limit=1`, eliminating false negatives when the candidate pair isn't the single most-similar result
+
+## [1.2.8] - 2026-03-19
+
+### Added
+
+- **`get_notes_info` tool**: Bulk note metadata retrieval — returns `exists`, `size_bytes`, `modified_at`, and `has_frontmatter` for a list of paths without reading full file content, enabling efficient batch filesystem inspection.
+- **`write_file_with_mode` tool**: Append and prepend support for file writes. Accepts a `mode` parameter (`overwrite`, `append`, `prepend`) and correctly handles frontmatter boundaries when prepending to YAML-frontmatter files.
+- **Cross-filesystem move support**: `move_file` now handles `CrossesDevices` errors by falling back to a copy-then-delete strategy, maintaining atomicity guarantees across filesystem boundaries.
+- **`AnalysisConfig` for health analysis**: Configurable `hub_notes_limit` (default 10) replaces the previously hardcoded cap of 5 in `HealthAnalyzer::analyze()`.
+- **`LinkGraph::unresolved_link_count()` helper**: Convenience method returning the total count of unresolved links across all source files.
+
+### Changed
+
+- **`write_file` delegates to `write_file_with_mode`**: Existing `write_file` calls are fully backward-compatible and default to `WriteMode::Overwrite`.
+- **`resolve_path` is now `pub`**: `VaultManager::resolve_path` is now publicly visible so tool layers (`FileTools`, `DataTools`) can reuse the battle-tested `path_trav`-backed security check without duplicating logic.
+- **`read_file` always reads from disk**: Removed the in-memory `VaultFile` cache path from `read_file` — the cache stores parsed content with frontmatter stripped, so bypassing it ensures callers always receive the complete raw file including frontmatter.
+- **Updated installation instructions and usage documentation in README**: Clarified TurboVault as both a Rust SDK and an MCP server with two distinct usage modes.
+- **Two-pass vault initialization**: `VaultManager::initialize()` now adds all files to the graph index first, then resolves links in a second pass. This eliminates scan-order-dependent resolution failures where files scanned later were not in the index when earlier files resolved links to them.
+- **Case-insensitive link resolution**: `LinkGraph::resolve_link` now lowercases all index keys at insertion and lookup time, matching Obsidian's case-insensitive wikilink behaviour.
+- **`file_index` and `alias_index` handle stem collisions**: Changed from single-value to multi-value maps (`HashMap<String, Vec<NodeIndex>>`), so files with the same lowercased stem on case-sensitive filesystems are all indexed rather than silently overwriting each other.
+- **Health score uses saturating arithmetic**: `HealthReport::calculate_score` now uses `saturating_sub` to prevent `u8` underflow when penalty values are large.
+- **Updated TurboMCP to v3.0.6** and all workspace dependencies to latest compatible versions.
+
+### Fixed
+
+- **Broken link detection was non-functional**: `get_broken_links`, `quick_health_check`, and `full_health_analysis` always reported zero broken links because `HealthAnalyzer::new()` (graph-only mode) was used but unresolved links never entered the graph. Unresolved links are now tracked in `LinkGraph.unresolved_links` and wired into `HealthAnalyzer::with_files()`. (PR #6 by @AntttMan)
+- **Petgraph swap-remove index corruption**: `remove_file` now correctly updates `path_index`, `file_index`, and `alias_index` after `remove_node`, which uses swap-remove internally and moves the last node into the removed slot. Previously, all external index maps for the swapped node became stale, causing wrong edges, self-loops, or panics on subsequent operations.
+- **Path-suffix fallback ignored `.md` extension**: The `resolve_link` path-suffix fallback (for `[[folder/Note]]`-style wikilinks) now strips `.md` from path components before comparison, so multi-segment wikilinks without extensions resolve correctly.
+- **Duplicate alias accumulation on re-add**: `add_file` called repeatedly (e.g. on every `write_file`) no longer pushes duplicate entries to `alias_index`.
+- **Path traversal protection unified**: `delete_file`, `move_file`, `copy_file`, and `get_notes_info` now all go through `VaultManager::resolve_path` (backed by the `path_trav` crate) instead of ad-hoc `starts_with` checks, closing potential bypass vectors.
+- **Stale `#[allow(dead_code)]` annotations**: `is_cache_expired` and `is_file_modified_since` are kept for future use and annotated with `#[allow(dead_code)]` to silence compiler warnings.
+
 ## [1.2.7] - 2026-03-04
 
 ### Changed
@@ -138,6 +216,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Atomic file operations with rollback support
 - Configuration profiles (development, production, readonly, high-performance)
 
+[1.2.8]: https://github.com/epistates/turbovault/compare/v1.2.7...v1.2.8
 [1.2.7]: https://github.com/epistates/turbovault/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/epistates/turbovault/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/epistates/turbovault/compare/v1.2.4...v1.2.5

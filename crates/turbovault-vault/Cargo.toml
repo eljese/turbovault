@@ -14,6 +14,7 @@ documentation = "https://docs.rs/turbovault-vault"
 turbovault-core = { workspace = true }
 turbovault-parser = { workspace = true }
 turbovault-graph = { workspace = true }
+turbovault-audit = { workspace = true }
 
 tokio = { workspace = true }
 tokio-util = { workspace = true }

@@ -50,6 +50,7 @@ path = "src/bin/main.rs"
 [dependencies]
 turbovault-core = { workspace = true }
 turbovault-vault = { workspace = true }
+turbovault-audit = { workspace = true }
 turbovault-tools = { workspace = true }
 
 # MCP server framework (features passed through from turbovault)

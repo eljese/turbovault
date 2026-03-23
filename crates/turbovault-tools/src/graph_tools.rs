@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use turbovault_core::prelude::*;
-use turbovault_graph::HealthAnalyzer;
+use turbovault_graph::{AnalysisConfig, HealthAnalyzer};
 use turbovault_vault::VaultManager;
 
 /// Graph tools context
@@ -43,7 +43,8 @@ impl GraphTools {
     pub async fn get_broken_links(&self) -> Result<Vec<BrokenLinkInfo>> {
         let graph_lock = self.manager.link_graph();
         let graph = graph_lock.read().await;
-        let analyzer = HealthAnalyzer::new(&graph);
+        let unresolved = graph.all_unresolved_links();
+        let analyzer = HealthAnalyzer::with_files(&graph, unresolved);
 
         let report = analyzer.analyze()?;
 
@@ -63,7 +64,8 @@ impl GraphTools {
     pub async fn quick_health_check(&self) -> Result<HealthInfo> {
         let graph_lock = self.manager.link_graph();
         let graph = graph_lock.read().await;
-        let analyzer = HealthAnalyzer::new(&graph);
+        let unresolved = graph.all_unresolved_links();
+        let analyzer = HealthAnalyzer::with_files(&graph, unresolved);
 
         let report = analyzer.quick_check()?;
 
@@ -83,7 +85,8 @@ impl GraphTools {
     pub async fn full_health_analysis(&self) -> Result<HealthInfo> {
         let graph_lock = self.manager.link_graph();
         let graph = graph_lock.read().await;
-        let analyzer = HealthAnalyzer::new(&graph);
+        let unresolved = graph.all_unresolved_links();
+        let analyzer = HealthAnalyzer::with_files(&graph, unresolved);
 
         let report = analyzer.analyze()?;
 
@@ -103,14 +106,18 @@ impl GraphTools {
     pub async fn get_hub_notes(&self, limit: usize) -> Result<Vec<(String, usize)>> {
         let graph_lock = self.manager.link_graph();
         let graph = graph_lock.read().await;
-        let analyzer = HealthAnalyzer::new(&graph);
+        let config = AnalysisConfig {
+            hub_notes_limit: limit,
+        };
+        // Pass None for unresolved links — hub detection only needs the resolved
+        // graph edges, not broken link data.
+        let analyzer = HealthAnalyzer::with_config(&graph, None, config);
 
         let report = analyzer.analyze()?;
 
         Ok(report
             .hub_notes
             .into_iter()
-            .take(limit)
             .map(|(path, count)| (path.to_string_lossy().to_string(), count))
             .collect())
     }

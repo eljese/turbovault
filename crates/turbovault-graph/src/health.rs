@@ -65,23 +65,23 @@ impl HealthReport {
             return;
         }
 
-        let mut score = 100;
+        let mut score: u8 = 100;
 
         // Penalize broken links (up to -30 points)
         let broken_ratio = self.broken_links.len() as f32 / self.total_links.max(1) as f32;
-        score -= (broken_ratio * 30.0) as u8;
+        score = score.saturating_sub((broken_ratio * 30.0) as u8);
 
         // Penalize orphaned notes (up to -20 points)
         let orphaned_ratio = self.orphaned_notes.len() as f32 / self.total_notes as f32;
-        score -= (orphaned_ratio * 20.0) as u8;
+        score = score.saturating_sub((orphaned_ratio * 20.0) as u8);
 
         // Penalize isolated clusters (up to -15 points)
         let isolated_ratio = self.isolated_clusters.len() as f32 / self.total_notes as f32;
-        score -= (isolated_ratio * 15.0) as u8;
+        score = score.saturating_sub((isolated_ratio * 15.0) as u8);
 
         // Penalize dead ends (up to -10 points)
         let dead_end_ratio = self.dead_end_notes.len() as f32 / self.total_notes as f32;
-        score -= (dead_end_ratio * 10.0) as u8;
+        score = score.saturating_sub((dead_end_ratio * 10.0) as u8);
 
         self.health_score = score;
     }
@@ -98,24 +98,51 @@ impl Default for HealthReport {
     }
 }
 
+/// Configuration for health analysis
+#[derive(Debug, Clone)]
+pub struct AnalysisConfig {
+    /// Maximum number of hub notes to include in the report (default: 10)
+    pub hub_notes_limit: usize,
+}
+
+impl Default for AnalysisConfig {
+    fn default() -> Self {
+        Self {
+            hub_notes_limit: 10,
+        }
+    }
+}
+
 /// Vault health analyzer
 pub struct HealthAnalyzer<'a> {
     graph: &'a LinkGraph,
     files: Option<&'a HashMap<PathBuf, Vec<Link>>>,
+    config: AnalysisConfig,
 }
 
 impl<'a> HealthAnalyzer<'a> {
-    /// Create a new health analyzer
+    /// Create a new health analyzer (graph-only, no broken link detection)
     pub fn new(graph: &'a LinkGraph) -> Self {
-        Self { graph, files: None }
+        Self::with_config(graph, None, AnalysisConfig::default())
     }
 
-    /// Create a new health analyzer with access to file links
+    /// Create a new health analyzer with access to unresolved links.
+    /// Uses [`AnalysisConfig::default`] for analysis parameters.
     /// (needed for detecting broken links that aren't in the graph)
     pub fn with_files(graph: &'a LinkGraph, files: &'a HashMap<PathBuf, Vec<Link>>) -> Self {
+        Self::with_config(graph, Some(files), AnalysisConfig::default())
+    }
+
+    /// Create a health analyzer with full configuration
+    pub fn with_config(
+        graph: &'a LinkGraph,
+        files: Option<&'a HashMap<PathBuf, Vec<Link>>>,
+        config: AnalysisConfig,
+    ) -> Self {
         Self {
             graph,
-            files: Some(files),
+            files,
+            config,
         }
     }
 
@@ -137,7 +164,7 @@ impl<'a> HealthAnalyzer<'a> {
         report.dead_end_notes = self.find_dead_end_notes()?;
 
         // Find hub notes (highly connected)
-        report.hub_notes = self.find_hub_notes(5)?;
+        report.hub_notes = self.find_hub_notes(self.config.hub_notes_limit)?;
 
         // Find isolated clusters
         report.isolated_clusters = self.find_isolated_clusters()?;

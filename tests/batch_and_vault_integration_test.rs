@@ -54,7 +54,7 @@ async fn test_batch_update_links() {
     manager.initialize().await.unwrap();
 
     manager
-        .write_file(&"doc.md".into(), "See [[old-link]] for details")
+        .write_file(&"doc.md".into(), "See [[old-link]] for details", None)
         .await
         .unwrap();
 

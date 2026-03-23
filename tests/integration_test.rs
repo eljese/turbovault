@@ -166,6 +166,7 @@ async fn test_query_metadata_equals() {
         .write_file(
             &PathBuf::from("draft1.md"),
             "---\nstatus: draft\nauthor: Jane\n---\n# Draft Note 1\nContent here",
+            None,
         )
         .await
         .unwrap();
@@ -174,6 +175,7 @@ async fn test_query_metadata_equals() {
         .write_file(
             &PathBuf::from("draft2.md"),
             "---\nstatus: draft\nauthor: Bob\n---\n# Draft Note 2\nContent here",
+            None,
         )
         .await
         .unwrap();
@@ -182,6 +184,7 @@ async fn test_query_metadata_equals() {
         .write_file(
             &PathBuf::from("published.md"),
             "---\nstatus: published\nauthor: Jane\n---\n# Published Note\nContent here",
+            None,
         )
         .await
         .unwrap();
@@ -210,15 +213,15 @@ async fn test_query_metadata_numeric_gt() {
     manager.initialize().await.unwrap();
 
     manager
-        .write_file(&PathBuf::from("p5.md"), "---\npriority: 5\n---\n")
+        .write_file(&PathBuf::from("p5.md"), "---\npriority: 5\n---\n", None)
         .await
         .unwrap();
     manager
-        .write_file(&PathBuf::from("p3.md"), "---\npriority: 3\n---\n")
+        .write_file(&PathBuf::from("p3.md"), "---\npriority: 3\n---\n", None)
         .await
         .unwrap();
     manager
-        .write_file(&PathBuf::from("p1.md"), "---\npriority: 1\n---\n")
+        .write_file(&PathBuf::from("p1.md"), "---\npriority: 1\n---\n", None)
         .await
         .unwrap();
 
@@ -248,6 +251,7 @@ async fn test_query_metadata_contains() {
         .write_file(
             &PathBuf::from("imp1.md"),
             "---\ntags: important task\n---\n",
+            None,
         )
         .await
         .unwrap();
@@ -255,11 +259,16 @@ async fn test_query_metadata_contains() {
         .write_file(
             &PathBuf::from("imp2.md"),
             "---\ntags: urgent and important\n---\n",
+            None,
         )
         .await
         .unwrap();
     manager
-        .write_file(&PathBuf::from("normal.md"), "---\ntags: routine\n---\n")
+        .write_file(
+            &PathBuf::from("normal.md"),
+            "---\ntags: routine\n---\n",
+            None,
+        )
         .await
         .unwrap();
 
@@ -286,7 +295,11 @@ async fn test_query_metadata_no_matches() {
     manager.initialize().await.unwrap();
 
     manager
-        .write_file(&PathBuf::from("file1.md"), "---\nstatus: active\n---\n")
+        .write_file(
+            &PathBuf::from("file1.md"),
+            "---\nstatus: active\n---\n",
+            None,
+        )
         .await
         .unwrap();
 
@@ -319,6 +332,7 @@ async fn test_get_metadata_value_simple() {
         .write_file(
             &PathBuf::from("test.md"),
             "---\nauthor: Jane Doe\ntitle: Test Note\n---\nContent",
+            None,
         )
         .await
         .unwrap();
@@ -349,6 +363,7 @@ async fn test_get_metadata_value_nested() {
         .write_file(
             &PathBuf::from("test.md"),
             "---\nproject:\n  status: active\n  name: MyProject\n---\nContent",
+            None,
         )
         .await
         .unwrap();
@@ -379,7 +394,11 @@ async fn test_get_metadata_value_missing_key() {
     manager.initialize().await.unwrap();
 
     manager
-        .write_file(&PathBuf::from("test.md"), "---\nauthor: Jane\n---\nContent")
+        .write_file(
+            &PathBuf::from("test.md"),
+            "---\nauthor: Jane\n---\nContent",
+            None,
+        )
         .await
         .unwrap();
 
@@ -406,7 +425,11 @@ async fn test_get_metadata_value_no_frontmatter() {
 
     // Write file without frontmatter
     manager
-        .write_file(&PathBuf::from("no_front.md"), "# Just Content\nNo frontmatter here")
+        .write_file(
+            &PathBuf::from("no_front.md"),
+            "# Just Content\nNo frontmatter here",
+            None,
+        )
         .await
         .unwrap();
 
@@ -437,7 +460,10 @@ async fn test_edit_file_simple_replacement() {
     // Create initial file
     let path = PathBuf::from("test.md");
     let initial_content = "# Hello World\n\nThis is a test file.\n\nGoodbye.";
-    manager.write_file(&path, initial_content).await.unwrap();
+    manager
+        .write_file(&path, initial_content, None)
+        .await
+        .unwrap();
 
     // Create edit blocks
     let edits = r#"<<<<<<< SEARCH
@@ -477,7 +503,7 @@ async fn test_edit_file_dry_run() {
 
     let path = PathBuf::from("dry_run.md");
     let initial = "# Test\n\nOriginal content";
-    manager.write_file(&path, initial).await.unwrap();
+    manager.write_file(&path, initial, None).await.unwrap();
 
     let edits = r#"<<<<<<< SEARCH
 Original content

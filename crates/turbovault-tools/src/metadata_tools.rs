@@ -1,10 +1,13 @@
 //! Metadata query tools for finding and extracting file metadata
 
+use crate::file_tools::{deep_merge, reconstruct_content, split_frontmatter};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use turbovault_core::prelude::*;
+use turbovault_parser::parse_tags;
 use turbovault_vault::VaultManager;
 
 /// Metadata query filter
@@ -159,6 +162,206 @@ impl MetadataTools {
         }))
     }
 
+    /// Update frontmatter of a note without touching content
+    ///
+    /// # Arguments
+    /// * `path` - Relative path to note in vault
+    /// * `frontmatter` - JSON object with frontmatter keys to set
+    /// * `merge` - If true, deep-merge into existing frontmatter. If false, replace entirely.
+    pub async fn update_frontmatter(
+        &self,
+        path: &str,
+        frontmatter: serde_json::Map<String, Value>,
+        merge: bool,
+    ) -> Result<Value> {
+        let file_path = PathBuf::from(path);
+        let content = self.manager.read_file(&file_path).await?;
+
+        let (existing_yaml, body) = split_frontmatter(&content);
+
+        // Parse existing frontmatter
+        let existing_fm: serde_json::Map<String, Value> = if let Some(yaml_str) = &existing_yaml {
+            serde_yaml::from_str(yaml_str).map_err(|e| {
+                Error::config_error(format!("Failed to parse existing frontmatter YAML: {}", e))
+            })?
+        } else {
+            serde_json::Map::new()
+        };
+
+        let final_fm = if merge {
+            let overlay = Value::Object(frontmatter);
+            let mut base = Value::Object(existing_fm);
+            deep_merge(&mut base, overlay);
+            match base {
+                Value::Object(map) => map,
+                _ => serde_json::Map::new(),
+            }
+        } else {
+            frontmatter
+        };
+
+        // Reconstruct and write
+        let new_content = reconstruct_content(Some(&final_fm), &body);
+        self.manager
+            .write_file(&file_path, &new_content, None)
+            .await?;
+
+        Ok(json!({
+            "path": path,
+            "status": "updated",
+            "merge": merge,
+            "keys_set": final_fm.keys().collect::<Vec<_>>()
+        }))
+    }
+
+    /// Manage tags on a note (add, remove, list)
+    ///
+    /// - "list": Returns both frontmatter tags AND inline #tags from content
+    /// - "add": Adds tags to frontmatter tags array (creates if missing)
+    /// - "remove": Removes tags from frontmatter tags array
+    pub async fn manage_tags(
+        &self,
+        path: &str,
+        operation: &str,
+        tags: Option<&[String]>,
+    ) -> Result<Value> {
+        let file_path = PathBuf::from(path);
+        let content = self.manager.read_file(&file_path).await?;
+
+        match operation {
+            "list" => {
+                // Get frontmatter tags
+                let (yaml_str, body) = split_frontmatter(&content);
+                let fm_tags: Vec<String> = if let Some(yaml) = &yaml_str {
+                    let fm: serde_json::Map<String, Value> =
+                        serde_yaml::from_str(yaml).map_err(|e| {
+                            Error::config_error(format!("Failed to parse frontmatter YAML: {}", e))
+                        })?;
+                    extract_tags_from_value(fm.get("tags"))
+                } else {
+                    vec![]
+                };
+
+                // Get inline tags from content
+                let parsed_tags = parse_tags(&body);
+                let inline_tags: Vec<String> = parsed_tags.into_iter().map(|t| t.name).collect();
+
+                // Deduplicate, preserving order
+                let mut seen = HashSet::new();
+                let mut all_tags = Vec::new();
+                for tag in fm_tags.iter().chain(inline_tags.iter()) {
+                    let normalized = tag.strip_prefix('#').unwrap_or(tag).to_string();
+                    if seen.insert(normalized.clone()) {
+                        all_tags.push(normalized);
+                    }
+                }
+
+                Ok(json!({
+                    "path": path,
+                    "frontmatter_tags": fm_tags,
+                    "inline_tags": inline_tags,
+                    "all_tags": all_tags
+                }))
+            }
+            "add" => {
+                let tags_to_add = tags.ok_or_else(|| {
+                    Error::config_error("Tags array required for 'add' operation".to_string())
+                })?;
+
+                let (yaml_str, body) = split_frontmatter(&content);
+                let mut fm: serde_json::Map<String, Value> = if let Some(yaml) = &yaml_str {
+                    serde_yaml::from_str(yaml).map_err(|e| {
+                        Error::config_error(format!("Failed to parse frontmatter YAML: {}", e))
+                    })?
+                } else {
+                    serde_json::Map::new()
+                };
+
+                // Get or create tags array
+                let mut existing_tags = extract_tags_from_value(fm.get("tags"));
+                for tag in tags_to_add {
+                    let normalized = tag.strip_prefix('#').unwrap_or(tag).to_string();
+                    if !existing_tags.contains(&normalized) {
+                        existing_tags.push(normalized);
+                    }
+                }
+
+                fm.insert(
+                    "tags".to_string(),
+                    Value::Array(
+                        existing_tags
+                            .iter()
+                            .map(|t| Value::String(t.clone()))
+                            .collect(),
+                    ),
+                );
+
+                let new_content = reconstruct_content(Some(&fm), &body);
+                self.manager
+                    .write_file(&file_path, &new_content, None)
+                    .await?;
+
+                Ok(json!({
+                    "path": path,
+                    "operation": "add",
+                    "tags": existing_tags,
+                    "status": "updated"
+                }))
+            }
+            "remove" => {
+                let tags_to_remove = tags.ok_or_else(|| {
+                    Error::config_error("Tags array required for 'remove' operation".to_string())
+                })?;
+
+                let (yaml_str, body) = split_frontmatter(&content);
+                let mut fm: serde_json::Map<String, Value> = if let Some(yaml) = &yaml_str {
+                    serde_yaml::from_str(yaml).map_err(|e| {
+                        Error::config_error(format!("Failed to parse frontmatter YAML: {}", e))
+                    })?
+                } else {
+                    return Ok(json!({
+                        "path": path,
+                        "operation": "remove",
+                        "tags": [],
+                        "status": "no_frontmatter"
+                    }));
+                };
+
+                let existing_tags = extract_tags_from_value(fm.get("tags"));
+                let remove_set: HashSet<String> = tags_to_remove
+                    .iter()
+                    .map(|t| t.strip_prefix('#').unwrap_or(t).to_string())
+                    .collect();
+
+                let remaining: Vec<String> = existing_tags
+                    .into_iter()
+                    .filter(|t| !remove_set.contains(t))
+                    .collect();
+
+                fm.insert(
+                    "tags".to_string(),
+                    Value::Array(remaining.iter().map(|t| Value::String(t.clone())).collect()),
+                );
+
+                let new_content = reconstruct_content(Some(&fm), &body);
+                self.manager
+                    .write_file(&file_path, &new_content, None)
+                    .await?;
+
+                Ok(json!({
+                    "path": path,
+                    "operation": "remove",
+                    "tags": remaining,
+                    "status": "updated"
+                }))
+            }
+            other => Err(Error::config_error(format!(
+                "Invalid tag operation '{}'. Must be 'add', 'remove', or 'list'",
+                other
+            ))),
+        }
+    }
+
     /// Get metadata value from a file by key (supports dot notation for nested keys)
     pub async fn get_metadata_value(&self, file: &str, key: &str) -> Result<Value> {
         // Resolve file path
@@ -191,6 +394,29 @@ impl MetadataTools {
     }
 }
 
+/// Extract tags from a frontmatter Value (handles both array and string forms)
+/// Always normalizes by stripping leading `#` prefix
+fn extract_tags_from_value(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|v| {
+                v.as_str()
+                    .map(|s| s.strip_prefix('#').unwrap_or(s).to_string())
+            })
+            .collect(),
+        Some(Value::String(s)) => s
+            .split(',')
+            .map(|t| {
+                let trimmed = t.trim();
+                trimmed.strip_prefix('#').unwrap_or(trimmed).to_string()
+            })
+            .filter(|t| !t.is_empty())
+            .collect(),
+        _ => vec![],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,25 +424,25 @@ mod tests {
     #[test]
     fn test_parse_query_equals_string() {
         let filter = parse_query(r#"status: "draft""#).unwrap();
-        matches!(filter, QueryFilter::Equals(_, _));
+        assert!(matches!(filter, QueryFilter::Equals(_, _)));
     }
 
     #[test]
     fn test_parse_query_greater_than() {
         let filter = parse_query("priority > 3").unwrap();
-        matches!(filter, QueryFilter::GreaterThan(_, _));
+        assert!(matches!(filter, QueryFilter::GreaterThan(_, _)));
     }
 
     #[test]
     fn test_parse_query_less_than() {
         let filter = parse_query("priority < 5").unwrap();
-        matches!(filter, QueryFilter::LessThan(_, _));
+        assert!(matches!(filter, QueryFilter::LessThan(_, _)));
     }
 
     #[test]
     fn test_parse_query_contains() {
         let filter = parse_query(r#"tags: contains("important")"#).unwrap();
-        matches!(filter, QueryFilter::Contains(_, _));
+        assert!(matches!(filter, QueryFilter::Contains(_, _)));
     }
 
     #[test]
@@ -282,6 +508,148 @@ mod tests {
             QueryFilter::GreaterThan("priority".to_string(), 5.0),
         ]);
         assert!(!filter_no_match.matches(&metadata));
+    }
+
+    #[test]
+    fn test_extract_tags_strips_hash_prefix() {
+        let val = serde_json::json!(["#work", "personal", "#urgent"]);
+        let tags = extract_tags_from_value(Some(&val));
+        assert_eq!(tags, vec!["work", "personal", "urgent"]);
+    }
+
+    #[test]
+    fn test_extract_tags_from_comma_string() {
+        let val = serde_json::json!("#work, personal, #urgent");
+        let tags = extract_tags_from_value(Some(&val));
+        assert_eq!(tags, vec!["work", "personal", "urgent"]);
+    }
+
+    // ==================== extract_tags_from_value edge cases ====================
+
+    #[test]
+    fn test_extract_tags_from_value_none() {
+        let tags = extract_tags_from_value(None);
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn test_extract_tags_from_value_null() {
+        let val = Value::Null;
+        let tags = extract_tags_from_value(Some(&val));
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn test_extract_tags_from_value_number() {
+        let val = serde_json::json!(42);
+        let tags = extract_tags_from_value(Some(&val));
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn test_extract_tags_from_value_empty_array() {
+        let val = serde_json::json!([]);
+        let tags = extract_tags_from_value(Some(&val));
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn test_extract_tags_from_value_array_with_non_string_elements() {
+        let val = serde_json::json!([1, null, "valid", true]);
+        let tags = extract_tags_from_value(Some(&val));
+        assert_eq!(tags, vec!["valid"]);
+    }
+
+    #[test]
+    fn test_extract_tags_from_value_comma_string_empty_segments() {
+        let val = serde_json::json!(" , ,,");
+        let tags = extract_tags_from_value(Some(&val));
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn test_extract_tags_from_value_comma_string_whitespace() {
+        let val = serde_json::json!(" work , personal ");
+        let tags = extract_tags_from_value(Some(&val));
+        assert_eq!(tags, vec!["work", "personal"]);
+    }
+
+    // ==================== parse_query edge cases ====================
+
+    #[test]
+    fn test_parse_query_contains_missing_quotes() {
+        // contains(important) without quotes should fail
+        let result = parse_query(r#"tags: contains(important)"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_query_key_with_colon_in_value() {
+        let filter = parse_query(r#"url: "http://example.com""#).unwrap();
+        assert!(matches!(filter, QueryFilter::Equals(_, _)));
+        if let QueryFilter::Equals(key, Value::String(val)) = filter {
+            assert_eq!(key, "url");
+            assert_eq!(val, "http://example.com");
+        } else {
+            panic!("Expected Equals filter");
+        }
+    }
+
+    #[test]
+    fn test_parse_query_leading_trailing_whitespace() {
+        let filter = parse_query(r#"  status: "draft"  "#).unwrap();
+        assert!(matches!(filter, QueryFilter::Equals(_, _)));
+    }
+
+    // ==================== QueryFilter::matches edge cases ====================
+
+    #[test]
+    fn test_filter_matches_greater_than_missing_key() {
+        let metadata = HashMap::new();
+        let filter = QueryFilter::GreaterThan("missing".to_string(), 3.0);
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_filter_matches_greater_than_non_numeric() {
+        let mut metadata = HashMap::new();
+        metadata.insert("priority".to_string(), Value::String("high".to_string()));
+        let filter = QueryFilter::GreaterThan("priority".to_string(), 3.0);
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_filter_matches_less_than_boundary() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "priority".to_string(),
+            Value::Number(serde_json::Number::from(5)),
+        );
+        // Exactly equal should NOT match LessThan
+        let filter = QueryFilter::LessThan("priority".to_string(), 5.0);
+        assert!(!filter.matches(&metadata));
+    }
+
+    #[test]
+    fn test_filter_matches_contains_non_string_value() {
+        let mut metadata = HashMap::new();
+        metadata.insert("tags".to_string(), serde_json::json!(["a", "b"]));
+        let filter = QueryFilter::Contains("tags".to_string(), "a".to_string());
+        assert!(!filter.matches(&metadata)); // Array is not a string
+    }
+
+    #[test]
+    fn test_filter_matches_and_empty() {
+        let metadata = HashMap::new();
+        let filter = QueryFilter::And(vec![]);
+        assert!(filter.matches(&metadata)); // all() on empty is true
+    }
+
+    #[test]
+    fn test_filter_matches_or_empty() {
+        let metadata = HashMap::new();
+        let filter = QueryFilter::Or(vec![]);
+        assert!(!filter.matches(&metadata)); // any() on empty is false
     }
 
     #[test]

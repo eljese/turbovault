@@ -101,11 +101,11 @@ pub mod graph;
 pub mod health;
 
 pub use graph::{GraphStats, LinkGraph};
-pub use health::{BrokenLink, HealthAnalyzer, HealthReport};
+pub use health::{AnalysisConfig, BrokenLink, HealthAnalyzer, HealthReport};
 pub use turbovault_core::prelude::*;
 
 pub mod prelude {
     pub use crate::graph::{GraphStats, LinkGraph};
-    pub use crate::health::{BrokenLink, HealthAnalyzer, HealthReport};
+    pub use crate::health::{AnalysisConfig, BrokenLink, HealthAnalyzer, HealthReport};
     pub use turbovault_core::prelude::*;
 }

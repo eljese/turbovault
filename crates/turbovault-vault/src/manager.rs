@@ -7,12 +7,17 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tracing::instrument;
+use turbovault_audit::{AuditEntry, AuditLog, OperationType, SnapshotStore};
 use turbovault_core::prelude::*;
 use turbovault_graph::LinkGraph;
 use turbovault_parser::Parser;
+use uuid::Uuid;
 
 /// File cache entry with timestamp
+/// Used during initialization to populate link graph; read path bypasses cache
+/// to ensure raw file content (including frontmatter) is always returned.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct CacheEntry {
     file: VaultFile,
     cached_at: f64,
@@ -25,6 +30,8 @@ pub struct VaultManager {
     parser: Parser,
     link_graph: Arc<RwLock<LinkGraph>>,
     file_cache: Arc<RwLock<HashMap<PathBuf, CacheEntry>>>,
+    audit_log: Option<Arc<AuditLog>>,
+    snapshot_store: Option<Arc<SnapshotStore>>,
 }
 
 impl VaultManager {
@@ -39,12 +46,30 @@ impl VaultManager {
             parser,
             link_graph: Arc::new(RwLock::new(LinkGraph::new())),
             file_cache: Arc::new(RwLock::new(HashMap::new())),
+            audit_log: None,
+            snapshot_store: None,
         })
     }
 
     /// Get vault path
     pub fn vault_path(&self) -> &PathBuf {
         &self.vault_path
+    }
+
+    /// Set the audit log and snapshot store for operation tracking
+    pub fn set_audit_log(&mut self, audit_log: Arc<AuditLog>, snapshot_store: Arc<SnapshotStore>) {
+        self.audit_log = Some(audit_log);
+        self.snapshot_store = Some(snapshot_store);
+    }
+
+    /// Get the audit log reference (if configured)
+    pub fn audit_log(&self) -> Option<&Arc<AuditLog>> {
+        self.audit_log.as_ref()
+    }
+
+    /// Get the snapshot store reference (if configured)
+    pub fn snapshot_store(&self) -> Option<&Arc<SnapshotStore>> {
+        self.snapshot_store.as_ref()
     }
 
     /// Initialize vault by scanning all files
@@ -59,10 +84,16 @@ impl VaultManager {
         let md_files = self.scan_files()?;
         log::info!("Found {} markdown files", md_files.len());
 
+        // Two-pass initialization: first add all files to the graph index,
+        // then resolve links. This ensures every file is discoverable when
+        // resolving wikilink targets, regardless of scan order.
+        let mut parsed_files = Vec::with_capacity(md_files.len());
+        let now = self.current_timestamp();
+
+        // Pass 1: parse all files, populate cache and graph nodes
         for file_path in md_files {
             log::debug!("Processing file: {:?}", file_path);
             if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
-                // Parse file
                 match self.parser.parse_file(&file_path, &content) {
                     Ok(vault_file) => {
                         log::debug!(
@@ -71,8 +102,6 @@ impl VaultManager {
                             vault_file.links.len()
                         );
 
-                        // Cache file
-                        let now = self.current_timestamp();
                         cache.insert(
                             file_path.clone(),
                             CacheEntry {
@@ -81,9 +110,8 @@ impl VaultManager {
                             },
                         );
 
-                        // Add to graph
                         let _ = graph.add_file(&vault_file);
-                        let _ = graph.update_links(&vault_file);
+                        parsed_files.push(vault_file);
                     }
                     Err(e) => {
                         log::warn!("Failed to parse {}: {}", file_path.display(), e);
@@ -92,6 +120,11 @@ impl VaultManager {
             } else {
                 log::warn!("Failed to read file: {:?}", file_path);
             }
+        }
+
+        // Pass 2: resolve links (all files now in the index)
+        for vault_file in &parsed_files {
+            let _ = graph.update_links(vault_file);
         }
 
         log::info!(
@@ -108,30 +141,17 @@ impl VaultManager {
     /// Cache entries are validated against the file's modification time on disk.
     /// If the file was modified externally (git sync, direct writes, other processes),
     /// the stale cache entry is bypassed and fresh content is read from disk.
+    ///
+    /// NOTE: Always reads raw file content from disk (including frontmatter).
+    /// The file cache stores parsed VaultFile with frontmatter stripped from content,
+    /// so it cannot be used here — callers expect the complete raw file.
     #[instrument(skip(self), fields(file = ?path), name = "vault_read_file")]
     pub async fn read_file(&self, path: &Path) -> Result<String> {
         let vault_path = self.resolve_path(path)?;
 
-        // Check cache — validate against file mtime to detect external modifications
-        let cache = self.file_cache.read().await;
-        if let Some(entry) = cache.get(&vault_path)
-            && !self.is_cache_expired(entry.cached_at)
-        {
-            // Verify the file hasn't been modified externally since we cached it
-            if !self
-                .is_file_modified_since(&vault_path, entry.cached_at)
-                .await
-            {
-                return Ok(entry.file.content.clone());
-            }
-            log::debug!(
-                "Cache entry stale (file modified externally): {}",
-                vault_path.display()
-            );
-        }
-        drop(cache);
-
-        // Read from disk
+        // Always read from disk to return raw content including frontmatter.
+        // The VaultFile cache stores parsed content with frontmatter stripped,
+        // which would silently lose frontmatter for callers.
         let content = tokio::fs::read_to_string(&vault_path)
             .await
             .map_err(Error::io)?;
@@ -139,18 +159,55 @@ impl VaultManager {
         Ok(content)
     }
 
-    /// Write file to disk atomically
+    /// Write file to disk atomically with optional optimistic concurrency control.
+    ///
+    /// If `expected_hash` is provided, the file's current content hash is verified
+    /// before writing. If it doesn't match (another agent modified the file since
+    /// the caller last read it), a `ConcurrencyError` is returned.
     #[instrument(skip(self, content), fields(file = ?path, size = content.len()), name = "vault_write_file")]
-    pub async fn write_file(&self, path: &Path, content: &str) -> Result<()> {
+    pub async fn write_file(
+        &self,
+        path: &Path,
+        content: &str,
+        expected_hash: Option<&str>,
+    ) -> Result<()> {
+        use crate::edit::compute_hash;
+
         let vault_path = self.resolve_path(path)?;
+
+        // Read current content for hash check and audit trail
+        let before_content = tokio::fs::read_to_string(&vault_path).await.ok();
+        let file_existed = before_content.is_some();
+
+        // Optimistic concurrency check
+        if let Some(expected) = expected_hash {
+            if let Some(ref current) = before_content {
+                let actual = compute_hash(current);
+                if actual != expected {
+                    return Err(Error::ConcurrencyError {
+                        reason: format!(
+                            "File modified since last read. Expected hash: {}, actual: {}. Re-read the file and retry.",
+                            expected, actual
+                        ),
+                    });
+                }
+            } else {
+                return Err(Error::ConcurrencyError {
+                    reason: format!(
+                        "File does not exist but expected_hash '{}' was provided. The file may have been deleted.",
+                        expected
+                    ),
+                });
+            }
+        }
 
         // Ensure parent directory exists
         if let Some(parent) = vault_path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(Error::io)?;
         }
 
-        // Write to temp file first
-        let temp_path = vault_path.with_extension("tmp");
+        // Write to temp file (UUID suffix prevents collision between concurrent writes)
+        let temp_path = vault_path.with_extension(format!("tmp.{}", Uuid::new_v4()));
         tokio::fs::write(&temp_path, content)
             .await
             .map_err(Error::io)?;
@@ -159,6 +216,45 @@ impl VaultManager {
         tokio::fs::rename(&temp_path, &vault_path)
             .await
             .map_err(Error::io)?;
+
+        // Record audit trail (fire-and-forget — never blocks writes)
+        if let (Some(audit_log), Some(snapshot_store)) = (&self.audit_log, &self.snapshot_store) {
+            let rel_path = vault_path
+                .strip_prefix(&self.vault_path)
+                .unwrap_or(&vault_path)
+                .to_string_lossy()
+                .to_string();
+
+            let operation = if file_existed {
+                OperationType::Update
+            } else {
+                OperationType::Create
+            };
+
+            let mut entry = AuditEntry::new(operation, &rel_path);
+
+            // Store before snapshot
+            if let Some(ref before) = before_content {
+                match snapshot_store.store(before).await {
+                    Ok(snap_id) => {
+                        entry = entry.with_before(SnapshotStore::compute_hash(before), snap_id);
+                    }
+                    Err(e) => log::warn!("Failed to store before-snapshot: {}", e),
+                }
+            }
+
+            // Store after snapshot
+            match snapshot_store.store(content).await {
+                Ok(snap_id) => {
+                    entry = entry.with_after(SnapshotStore::compute_hash(content), snap_id);
+                }
+                Err(e) => log::warn!("Failed to store after-snapshot: {}", e),
+            }
+
+            if let Err(e) = audit_log.record(&entry).await {
+                log::warn!("Failed to record audit entry: {}", e);
+            }
+        }
 
         // Invalidate file cache
         let mut cache = self.file_cache.write().await;
@@ -256,10 +352,183 @@ impl VaultManager {
         // Release cache guard before write (avoid deadlock)
         drop(_cache_guard);
 
-        // Write atomically (reuses existing write_file logic)
-        self.write_file(&vault_path, &new_content).await?;
+        // Write atomically (hash already validated above, pass None)
+        self.write_file(&vault_path, &new_content, None).await?;
 
         Ok(edit_result)
+    }
+
+    /// Delete file from vault with audit trail, graph cleanup, and optional concurrency check.
+    #[instrument(skip(self), fields(file = ?path), name = "vault_delete_file")]
+    pub async fn delete_file(&self, path: &Path, expected_hash: Option<&str>) -> Result<()> {
+        use crate::edit::compute_hash;
+
+        let vault_path = self.resolve_path(path)?;
+
+        // Read content for hash check and audit trail
+        let before_content = tokio::fs::read_to_string(&vault_path).await.ok();
+
+        // Optimistic concurrency check
+        if let (Some(expected), Some(current)) = (expected_hash, &before_content) {
+            let actual = compute_hash(current);
+            if actual != expected {
+                return Err(Error::ConcurrencyError {
+                    reason: format!(
+                        "File modified since last read. Expected hash: {}, actual: {}. Re-read the file and retry.",
+                        expected, actual
+                    ),
+                });
+            }
+        }
+
+        tokio::fs::remove_file(&vault_path)
+            .await
+            .map_err(Error::io)?;
+
+        // Remove from graph
+        {
+            let mut graph = self.link_graph.write().await;
+            let _ = graph.remove_file(&vault_path);
+        }
+
+        // Invalidate cache
+        {
+            let mut cache = self.file_cache.write().await;
+            cache.remove(&vault_path);
+        }
+
+        // Record audit trail
+        if let (Some(audit_log), Some(snapshot_store)) = (&self.audit_log, &self.snapshot_store) {
+            let rel_path = vault_path
+                .strip_prefix(&self.vault_path)
+                .unwrap_or(&vault_path)
+                .to_string_lossy()
+                .to_string();
+
+            let mut entry = AuditEntry::new(OperationType::Delete, &rel_path);
+
+            if let Some(ref before) = before_content {
+                match snapshot_store.store(before).await {
+                    Ok(snap_id) => {
+                        entry = entry.with_before(SnapshotStore::compute_hash(before), snap_id);
+                    }
+                    Err(e) => log::warn!("Failed to store before-snapshot: {}", e),
+                }
+            }
+
+            if let Err(e) = audit_log.record(&entry).await {
+                log::warn!("Failed to record audit entry: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Move file within vault with audit trail, graph update, and optional concurrency check.
+    #[instrument(skip(self), fields(from = ?from, to = ?to), name = "vault_move_file")]
+    pub async fn move_file(
+        &self,
+        from: &Path,
+        to: &Path,
+        expected_hash: Option<&str>,
+    ) -> Result<()> {
+        use crate::edit::compute_hash;
+
+        let from_path = self.resolve_path(from)?;
+        let to_path = self.resolve_path(to)?;
+
+        // Read content before move for graph update, audit, and hash check
+        let content = tokio::fs::read_to_string(&from_path)
+            .await
+            .map_err(Error::io)?;
+
+        // Optimistic concurrency check
+        if let Some(expected) = expected_hash {
+            let actual = compute_hash(&content);
+            if actual != expected {
+                return Err(Error::ConcurrencyError {
+                    reason: format!(
+                        "File modified since last read. Expected hash: {}, actual: {}. Re-read the file and retry.",
+                        expected, actual
+                    ),
+                });
+            }
+        }
+
+        // Ensure parent directory exists
+        if let Some(parent) = to_path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(Error::io)?;
+        }
+
+        // Perform rename
+        match tokio::fs::rename(&from_path, &to_path).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+                tokio::fs::copy(&from_path, &to_path)
+                    .await
+                    .map_err(Error::io)?;
+                if let Err(del_err) = tokio::fs::remove_file(&from_path).await {
+                    let _ = tokio::fs::remove_file(&to_path).await;
+                    return Err(Error::io(del_err));
+                }
+            }
+            Err(e) => return Err(Error::io(e)),
+        }
+
+        // Update graph: remove old, add new
+        {
+            let mut graph = self.link_graph.write().await;
+            let _ = graph.remove_file(&from_path);
+        }
+
+        // Invalidate cache for old path
+        {
+            let mut cache = self.file_cache.write().await;
+            cache.remove(&from_path);
+        }
+
+        // Parse and add to graph at new location
+        match self.parser.parse_file(&to_path, &content) {
+            Ok(vault_file) => {
+                let mut graph = self.link_graph.write().await;
+                let _ = graph.add_file(&vault_file);
+                let _ = graph.update_links(&vault_file);
+            }
+            Err(e) => {
+                log::warn!("Failed to parse {} after move: {}", to_path.display(), e);
+            }
+        }
+
+        // Record audit trail
+        if let (Some(audit_log), Some(snapshot_store)) = (&self.audit_log, &self.snapshot_store) {
+            let rel_from = from_path
+                .strip_prefix(&self.vault_path)
+                .unwrap_or(&from_path)
+                .to_string_lossy()
+                .to_string();
+            let rel_to = to_path
+                .strip_prefix(&self.vault_path)
+                .unwrap_or(&to_path)
+                .to_string_lossy()
+                .to_string();
+
+            let mut entry = AuditEntry::new(OperationType::Move, &rel_from).with_new_path(&rel_to);
+
+            match snapshot_store.store(&content).await {
+                Ok(snap_id) => {
+                    let hash = SnapshotStore::compute_hash(&content);
+                    entry = entry.with_before(hash.clone(), snap_id.clone());
+                    entry = entry.with_after(hash, snap_id);
+                }
+                Err(e) => log::warn!("Failed to store snapshot: {}", e),
+            }
+
+            if let Err(e) = audit_log.record(&entry).await {
+                log::warn!("Failed to record audit entry: {}", e);
+            }
+        }
+
+        Ok(())
     }
 
     /// Get backlinks for a file
@@ -322,7 +591,7 @@ impl VaultManager {
 
     /// Resolve a relative path to vault-root-relative path with path traversal protection
     /// Uses the battle-tested path_trav crate for security, with fallback normalization
-    fn resolve_path(&self, path: &Path) -> Result<PathBuf> {
+    pub fn resolve_path(&self, path: &Path) -> Result<PathBuf> {
         // Resolve relative paths to absolute
         let full_path = if path.is_absolute() {
             path.to_path_buf()
@@ -404,6 +673,7 @@ impl VaultManager {
     }
 
     /// Check if cache entry is expired (TTL-based)
+    #[allow(dead_code)]
     fn is_cache_expired(&self, cached_at: f64) -> bool {
         let now = self.current_timestamp();
         now - cached_at > self.config.cache_ttl as f64
@@ -412,6 +682,7 @@ impl VaultManager {
     /// Check if a file has been modified on disk since the given timestamp.
     /// Returns true if the file's mtime is newer than `since`, indicating
     /// the cache entry is stale due to external modification.
+    #[allow(dead_code)]
     async fn is_file_modified_since(&self, path: &Path, since: f64) -> bool {
         match tokio::fs::metadata(path).await {
             Ok(meta) => match meta.modified() {
@@ -494,7 +765,7 @@ mod tests {
         // Write a file
         let path = Path::new("test.md");
         let content = "# Test Note\nHello world";
-        assert!(manager.write_file(path, content).await.is_ok());
+        assert!(manager.write_file(path, content, None).await.is_ok());
 
         // Read it back
         let read_content = manager.read_file(path).await.unwrap();
@@ -510,7 +781,7 @@ mod tests {
         // Write file in nested directory
         let path = Path::new("notes/subfolder/test.md");
         let content = "Nested file";
-        assert!(manager.write_file(path, content).await.is_ok());
+        assert!(manager.write_file(path, content, None).await.is_ok());
 
         // Verify it was created
         let read_content = manager.read_file(path).await.unwrap();
@@ -539,7 +810,7 @@ mod tests {
         let content = "Atomic write test";
 
         // Write file
-        assert!(manager.write_file(path, content).await.is_ok());
+        assert!(manager.write_file(path, content, None).await.is_ok());
 
         // Verify no .tmp files are left
         let entries = std::fs::read_dir(temp_dir.path()).unwrap();
@@ -562,7 +833,7 @@ mod tests {
         let content1 = "Original content";
 
         // Write initial file
-        assert!(manager.write_file(path, content1).await.is_ok());
+        assert!(manager.write_file(path, content1, None).await.is_ok());
 
         // Read from cache
         let read1 = manager.read_file(path).await.unwrap();

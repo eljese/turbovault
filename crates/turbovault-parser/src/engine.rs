@@ -206,6 +206,15 @@ impl<'a> ParseEngine<'a> {
         // Store the body start offset (which is the end of frontmatter)
         result.frontmatter_end_offset = body_start;
 
+        // Phase 1.5: Extract wikilinks and embeds from frontmatter YAML values.
+        // Obsidian vaults commonly store wikilinks in frontmatter fields like
+        // Area: "[[Hub]]" and Links: ["[[Doc A]]", "[[Doc B]]"].
+        // These are invisible to the body-only regex pass, so we scan them here.
+        if options.parse_wikilinks && body_start > 0 {
+            let frontmatter_text = &self.content[..body_start];
+            self.parse_frontmatter_wikilinks(frontmatter_text, &mut result);
+        }
+
         // Phase 2: OFM-specific regex pass (respecting excluded ranges)
         let body = if body_start > 0 {
             &self.content[body_start..]
@@ -502,6 +511,82 @@ impl<'a> ParseEngine<'a> {
             if excluded.contains(global_start) {
                 continue;
             }
+
+            let raw_target = caps.get(1).unwrap().as_str();
+            let (target, display_text) = parse_link_target(raw_target);
+
+            result.embeds.push(Link {
+                type_: LinkType::Embed,
+                source_file: source.clone(),
+                target,
+                display_text,
+                position: SourcePosition::from_offset_indexed(
+                    &self.index,
+                    global_start,
+                    full_match.len(),
+                ),
+                resolved_target: None,
+                is_valid: true,
+            });
+        }
+    }
+
+    /// Extract wikilinks and embeds from YAML frontmatter string values.
+    ///
+    /// Obsidian vaults commonly store wikilinks in frontmatter fields:
+    /// ```yaml
+    /// Area: "[[My Project Hub]]"
+    /// Links:
+    ///   - "[[Doc A]]"
+    ///   - "[[Doc B]]"
+    /// ```
+    ///
+    /// The body parser skips frontmatter entirely, so these links would be
+    /// invisible to the link graph without this dedicated extraction pass.
+    fn parse_frontmatter_wikilinks(&self, frontmatter_text: &str, result: &mut ParseResult) {
+        if !has_wikilink(frontmatter_text) {
+            return;
+        }
+
+        let source = self
+            .source_file
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
+
+        // Extract wikilinks: [[target]] or [[target|display]]
+        for caps in WIKILINK.captures_iter(frontmatter_text) {
+            let full_match = caps.get(0).unwrap();
+            let global_start = full_match.start();
+
+            // Skip if preceded by ! (it's an embed, handled below)
+            if global_start > 0 && frontmatter_text.as_bytes().get(global_start - 1) == Some(&b'!')
+            {
+                continue;
+            }
+
+            let raw_target = caps.get(1).unwrap().as_str();
+            let (target, display_text) = parse_link_target(raw_target);
+            let link_type = classify_wikilink(&target);
+
+            result.wikilinks.push(Link {
+                type_: link_type,
+                source_file: source.clone(),
+                target,
+                display_text,
+                position: SourcePosition::from_offset_indexed(
+                    &self.index,
+                    global_start,
+                    full_match.len(),
+                ),
+                resolved_target: None,
+                is_valid: true,
+            });
+        }
+
+        // Extract embeds: ![[target]]
+        for caps in EMBED.captures_iter(frontmatter_text) {
+            let full_match = caps.get(0).unwrap();
+            let global_start = full_match.start();
 
             let raw_target = caps.get(1).unwrap().as_str();
             let (target, display_text) = parse_link_target(raw_target);
@@ -1161,5 +1246,136 @@ Back to normal [[Valid]]
             result.headings[0].anchor,
             Some("multiple-spaces-here".to_string())
         );
+    }
+
+    // =========================================================================
+    // FRONTMATTER WIKILINK EXTRACTION TESTS
+    // =========================================================================
+
+    #[test]
+    fn test_frontmatter_wikilink_single() {
+        let content = "---\nArea: \"[[My Hub]]\"\n---\n\n# Content";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert_eq!(result.wikilinks.len(), 1);
+        assert_eq!(result.wikilinks[0].target, "My Hub");
+    }
+
+    #[test]
+    fn test_frontmatter_wikilink_list() {
+        let content =
+            "---\nLinks:\n  - \"[[Doc A]]\"\n  - \"[[Doc B]]\"\n  - \"[[Doc C]]\"\n---\n\nBody";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert_eq!(result.wikilinks.len(), 3);
+        assert_eq!(result.wikilinks[0].target, "Doc A");
+        assert_eq!(result.wikilinks[1].target, "Doc B");
+        assert_eq!(result.wikilinks[2].target, "Doc C");
+    }
+
+    #[test]
+    fn test_frontmatter_wikilink_with_display_text() {
+        let content = "---\nArea: \"[[Hub|My Display Text]]\"\n---\n\nBody";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert_eq!(result.wikilinks.len(), 1);
+        assert_eq!(result.wikilinks[0].target, "Hub");
+        assert_eq!(
+            result.wikilinks[0].display_text,
+            Some("My Display Text".to_string())
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_wikilink_with_heading_ref() {
+        let content = "---\nLinks:\n  - \"[[Note#Section]]\"\n---\n\nBody";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert_eq!(result.wikilinks.len(), 1);
+        assert_eq!(result.wikilinks[0].target, "Note#Section");
+        assert_eq!(result.wikilinks[0].type_, LinkType::HeadingRef);
+    }
+
+    #[test]
+    fn test_frontmatter_embed() {
+        let content = "---\nBanner: \"![[image.png]]\"\n---\n\nBody";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert_eq!(result.embeds.len(), 1);
+        assert_eq!(result.embeds[0].target, "image.png");
+        assert_eq!(result.embeds[0].type_, LinkType::Embed);
+        // The embed should NOT also appear as a wikilink
+        assert!(result.wikilinks.is_empty());
+    }
+
+    #[test]
+    fn test_frontmatter_and_body_wikilinks_combined() {
+        let content = "---\nArea: \"[[Hub]]\"\n---\n\nSee [[Body Link]] here";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert_eq!(result.wikilinks.len(), 2);
+        assert_eq!(result.wikilinks[0].target, "Hub");
+        assert_eq!(result.wikilinks[1].target, "Body Link");
+    }
+
+    #[test]
+    fn test_frontmatter_wikilinks_not_extracted_when_disabled() {
+        let content = "---\nArea: \"[[Hub]]\"\n---\n\nBody";
+        let engine = ParseEngine::new(content);
+        let opts = ParseOptions {
+            parse_wikilinks: false,
+            ..ParseOptions::none()
+        };
+        let result = engine.parse(&opts);
+
+        assert!(result.wikilinks.is_empty());
+    }
+
+    #[test]
+    fn test_frontmatter_wikilink_unicode() {
+        let content = "---\nArea: \"[[My Project Hub]]\"\n---\n\nBody";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert_eq!(result.wikilinks.len(), 1);
+        assert_eq!(result.wikilinks[0].target, "My Project Hub");
+    }
+
+    #[test]
+    fn test_frontmatter_no_wikilinks() {
+        let content = "---\ntitle: Just a string\ntags:\n  - rust\n---\n\nBody";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert!(result.wikilinks.is_empty());
+    }
+
+    #[test]
+    fn test_frontmatter_multiple_fields_with_wikilinks() {
+        let content = "---\nArea: \"[[Hub]]\"\nLayer: \"[[Security Layer]]\"\nLinks:\n  - \"[[Doc A]]\"\n---\n\nBody";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert_eq!(result.wikilinks.len(), 3);
+        let targets: Vec<&str> = result.wikilinks.iter().map(|l| l.target.as_str()).collect();
+        assert!(targets.contains(&"Hub"));
+        assert!(targets.contains(&"Security Layer"));
+        assert!(targets.contains(&"Doc A"));
+    }
+
+    #[test]
+    fn test_no_frontmatter_no_crash() {
+        let content = "No frontmatter here\n\n[[Link]]";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert_eq!(result.wikilinks.len(), 1);
+        assert_eq!(result.wikilinks[0].target, "Link");
     }
 }

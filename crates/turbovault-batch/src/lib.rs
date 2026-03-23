@@ -362,13 +362,13 @@ impl BatchExecutor {
         match op {
             BatchOperation::CreateNote { path, content } => {
                 let path_buf = PathBuf::from(path);
-                self.manager.write_file(&path_buf, content).await?;
+                self.manager.write_file(&path_buf, content, None).await?;
                 Ok(format!("Created: {}", path))
             }
 
             BatchOperation::WriteNote { path, content } => {
                 let path_buf = PathBuf::from(path);
-                self.manager.write_file(&path_buf, content).await?;
+                self.manager.write_file(&path_buf, content, None).await?;
                 Ok(format!("Updated: {}", path))
             }
 
@@ -427,7 +427,7 @@ impl BatchExecutor {
 
                 // Write back if changed
                 if updated != content {
-                    self.manager.write_file(&path_buf, &updated).await?;
+                    self.manager.write_file(&path_buf, &updated, None).await?;
                     Ok(format!(
                         "Updated links in {}: {} → {}",
                         file, old_target, new_target

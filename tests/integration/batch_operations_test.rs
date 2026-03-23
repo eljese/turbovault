@@ -54,7 +54,7 @@ async fn test_batch_write_file() {
 
     // Create initial file
     manager
-        .write_file(&"test.md".into(), "original")
+        .write_file(&"test.md".into(), "original", None)
         .await
         .unwrap();
 
@@ -160,7 +160,7 @@ async fn test_batch_update_links() {
 
     // Create file with link
     manager
-        .write_file(&"doc.md".into(), "See [[old-link]] for details")
+        .write_file(&"doc.md".into(), "See [[old-link]] for details", None)
         .await
         .unwrap();
 
