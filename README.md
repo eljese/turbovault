@@ -1,5 +1,13 @@
 # TurboVault
 
+## 🍴 Custom Fork Details (`eljese/turbovault`)
+
+This repository is a managed fork of the official [Epistates/turbovault](https://github.com/epistates/turbovault).
+
+- **Upstream Sync:** Merged with `v1.2.9` official releases.
+- **Deployment:** Automatically built via GitHub Actions and pushed to `ghcr.io/eljese/management/turbovault:latest`.
+- **Infrastructure:** Integrated into the `homelab-ops` GitOps pipeline for deployment on `prod2`.
+
 [![Crates.io](https://img.shields.io/crates/v/turbovault.svg)](https://crates.io/crates/turbovault)
 [![Docs.rs](https://docs.rs/turbovault/badge.svg)](https://docs.rs/turbovault)
 [![License](https://img.shields.io/crates/l/turbovault.svg)](https://github.com/epistates/turbovault/blob/main/LICENSE)
