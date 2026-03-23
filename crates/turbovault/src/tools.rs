@@ -11,10 +11,10 @@ use turbovault_core::ServerConfig;
 use turbovault_core::error::Error;
 use turbovault_core::prelude::MultiVaultManager;
 use turbovault_tools::{
-    AnalysisTools, AuditTools, BatchOperation, BatchTools, DiffTools, DuplicateTools, ExportTools,
-    FileTools, GraphTools, MetadataTools, QualityTools, RelationshipTools, SearchEngine,
-    SearchQuery, SearchTools, SimilarityEngine, TemplateEngine, VaultLifecycleTools, WriteMode,
-    obsidian_uri,
+    AnalysisTools, AuditTools, BatchOperation, BatchTools, DiffTools, DirectorTools,
+    DuplicateTools, ExportTools, FileTools, GraphTools, LockTools, MetadataTools, QualityTools,
+    RelationshipTools, SearchEngine, SearchQuery, SearchTools, SimilarityEngine, TemplateEngine,
+    VaultLifecycleTools, WriteMode, obsidian_uri,
 };
 use turbovault_vault::VaultManager;
 
@@ -2515,5 +2515,105 @@ impl ObsidianMcpServer {
         .with_duration(start.elapsed().as_millis() as u64)
         .with_next_steps(&["audit_log", "explain_vault"])
         .to_json()
+    }
+
+    // ==================== Director Agent (Swarm Orchestration) ====================
+
+    /// Recruit a specialized agent swarm to handle a complex task (Dynamic Swarm Recruitment).
+    #[tool(
+        description = "Recruit a specialized agent swarm to handle a complex task (Dynamic Swarm Recruitment).",
+        usage = "Use when a task requires multiple expert personas (e.g., Architect + Scribe). Analyzes the prompt and returns a coalition plan.",
+        performance = "Fast (<50ms), rule-based matching in Phase 1.",
+        related = ["post_swarm_message"],
+        examples = ["director_recruit_swarm(prompt='Refactor the Rust bridge and document changes')"]
+    )]
+    async fn director_recruit_swarm(&self, prompt: String) -> McpResult<serde_json::Value> {
+        let (vault_name, manager) = self.get_vault_pair().await?;
+        let tools = DirectorTools::new(manager);
+        let result = tools.recruit_swarm(&prompt).await.map_err(to_mcp_error)?;
+
+        StandardResponse::new(vault_name, "director_recruit_swarm", result)
+            .with_next_step("post_swarm_message")
+            .to_json()
+    }
+
+    /// Post a message to the Inter-Agent Communication (IAC) channel
+    #[tool(
+        description = "Post a message to the swarm IAC channel (Neo4j-backed).",
+        usage = "Use to coordinate actions between recruited agents. Recorded as a :MESSAGE node in the knowledge graph.",
+        performance = "Fast, queues message for persistence.",
+        related = ["director_recruit_swarm"],
+        examples = ["post_swarm_message(from='Architect', to='Scribe', content='Implementation complete. Please document.')"]
+    )]
+    async fn post_swarm_message(
+        &self,
+        from: String,
+        to: String,
+        content: String,
+    ) -> McpResult<serde_json::Value> {
+        let (vault_name, manager) = self.get_vault_pair().await?;
+        let tools = DirectorTools::new(manager);
+        let result = tools
+            .post_swarm_message(&from, &to, &content)
+            .await
+            .map_err(to_mcp_error)?;
+
+        StandardResponse::new(vault_name, "post_swarm_message", result).to_json()
+    }
+
+    // ==================== Locking ====================
+
+    /// Acquire a lock on a file
+    #[tool(
+        description = "Acquire a lock on a file for collaborative editing",
+        usage = "Use before starting a long-running edit session or to prevent concurrent modifications by other agents. Provide an owner ID (e.g., your name or session ID).",
+        performance = "Fast (<10ms). Locks are advisory and stored in memory.",
+        related = ["release_lock", "check_lock", "write_note"],
+        examples = ["acquire_lock(path='notes/important.md', owner='Agent-Alice')"]
+    )]
+    async fn acquire_lock(
+        &self,
+        path: String,
+        owner: String,
+        timeout: Option<u64>,
+    ) -> McpResult<serde_json::Value> {
+        let (vault_name, manager) = self.get_vault_pair().await?;
+        let tools = LockTools::new(manager);
+        let lock = tools.acquire_lock(path, owner, timeout).await.map_err(to_mcp_error)?;
+        StandardResponse::new(vault_name, "acquire_lock", serde_json::to_value(lock)?)
+            .with_next_step("write_note")
+            .with_next_step("release_lock")
+            .to_json()
+    }
+
+    /// Release a lock on a file
+    #[tool(
+        description = "Release a previously acquired lock on a file",
+        usage = "Call this after completing your edits to allow other agents to modify the file.",
+        performance = "Fast (<10ms).",
+        related = ["acquire_lock", "check_lock"],
+        examples = ["release_lock(path='notes/important.md', owner='Agent-Alice')"]
+    )]
+    async fn release_lock(&self, path: String, owner: String) -> McpResult<serde_json::Value> {
+        let (vault_name, manager) = self.get_vault_pair().await?;
+        let tools = LockTools::new(manager);
+        tools.release_lock(path, owner).await.map_err(to_mcp_error)?;
+        StandardResponse::new(vault_name, "release_lock", serde_json::json!({"status": "released"}))
+            .to_json()
+    }
+
+    /// Check if a file is locked
+    #[tool(
+        description = "Check if a file is currently locked and by whom",
+        usage = "Use to verify if you can safely acquire a lock or to see who is currently editing a file.",
+        performance = "Fast (<10ms).",
+        related = ["acquire_lock", "release_lock"],
+        examples = ["check_lock(path='notes/important.md')"]
+    )]
+    async fn check_lock(&self, path: String) -> McpResult<serde_json::Value> {
+        let (vault_name, manager) = self.get_vault_pair().await?;
+        let tools = LockTools::new(manager);
+        let lock = tools.check_lock(path).await.map_err(to_mcp_error)?;
+        StandardResponse::new(vault_name, "check_lock", serde_json::to_value(lock)?).to_json()
     }
 }
