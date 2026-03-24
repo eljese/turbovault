@@ -12,9 +12,9 @@ use turbovault_core::error::Error;
 use turbovault_core::prelude::MultiVaultManager;
 use turbovault_tools::{
     AnalysisTools, AuditTools, BatchOperation, BatchTools, DiffTools, DirectorTools,
-    DuplicateTools, ExportTools, FileTools, GraphTools, MetadataTools, QualityTools,
+    DuplicateTools, ExportTools, FileTools, GraphTools, LockTools, MetadataTools, QualityTools,
     RelationshipTools, SearchEngine, SearchQuery, SearchTools, SimilarityEngine, TemplateEngine,
-    VaultLifecycleTools, WriteMode, obsidian_uri,
+    VaultLifecycleTools, WriteMode, obsidian_uri, parse_obsidian_uri,
 };
 use turbovault_vault::VaultManager;
 

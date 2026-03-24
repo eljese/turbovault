@@ -198,7 +198,7 @@ impl Link {
             is_valid: true,
         }
     }
-
+}
 
 /// A heading in vault content
 #[derive(Debug, Clone, Serialize, Deserialize)]
