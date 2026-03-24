@@ -28,6 +28,12 @@ pub struct LinkGraph {
     /// Map from full path to node index (for quick lookups)
     path_index: HashMap<PathBuf, NodeIndex>,
 
+    /// Index for cross-vault links: (target_vault, target_name) -> Vec<Link>
+    cross_vault_index: HashMap<(String, String), Vec<Link>>,
+
+    /// Index for cross-vault links by source: source_path -> Vec<Link>
+    cross_vault_source_index: HashMap<PathBuf, Vec<Link>>,
+
     /// Links that could not be resolved to a target file, grouped by source path.
     /// Used by HealthAnalyzer for broken link detection.
     unresolved_links: HashMap<PathBuf, Vec<Link>>,
@@ -41,6 +47,8 @@ impl LinkGraph {
             file_index: HashMap::new(),
             alias_index: HashMap::new(),
             path_index: HashMap::new(),
+            cross_vault_index: HashMap::new(),
+            cross_vault_source_index: HashMap::new(),
             unresolved_links: HashMap::new(),
         }
     }
@@ -181,10 +189,29 @@ impl LinkGraph {
         }
         self.unresolved_links.remove(source_path);
 
+        // Clear existing cross-vault links from this source
+        for links in self.cross_vault_index.values_mut() {
+            links.retain(|l| &l.source_file != source_path);
+        }
+        self.cross_vault_index.retain(|_, v| !v.is_empty());
+        self.cross_vault_source_index.remove(source_path);
+
         // Add edges for each internal link (wikilinks and embeds)
         for link in &file.links {
             if matches!(link.type_, LinkType::WikiLink | LinkType::Embed) {
-                if let Some(target_idx) = self.resolve_link(&link.target) {
+                if let Some(target_vault) = &link.target_vault {
+                    // Cross-vault link: index it separately
+                    self.cross_vault_index
+                        .entry((target_vault.clone(), link.target.clone()))
+                        .or_default()
+                        .push(link.clone());
+
+                    self.cross_vault_source_index
+                        .entry(source_path.clone())
+                        .or_default()
+                        .push(link.clone());
+                } else if let Some(target_idx) = self.resolve_link(&link.target) {
+                    // Internal link
                     self.graph.add_edge(source_idx, target_idx, link.clone());
                 } else {
                     // Track unresolved links for broken link detection
@@ -462,6 +489,19 @@ impl LinkGraph {
     /// whose target could not be resolved to an existing vault file.
     pub fn all_unresolved_links(&self) -> &HashMap<PathBuf, Vec<Link>> {
         &self.unresolved_links
+    }
+
+    /// Get all cross-vault links found in the vault
+    pub fn get_cross_vault_links(&self) -> &HashMap<(String, String), Vec<Link>> {
+        &self.cross_vault_index
+    }
+
+    /// Get cross-vault links for a specific source file
+    pub fn get_cross_vault_links_for(&self, path: &PathBuf) -> Vec<Link> {
+        self.cross_vault_source_index
+            .get(path)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Find connected components in the graph (using undirected view)

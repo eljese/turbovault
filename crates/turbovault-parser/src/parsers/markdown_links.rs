@@ -83,7 +83,7 @@ pub fn parse_markdown_links(content: &str) -> Vec<Link> {
                 target: url.to_string(),
                 display_text: Some(text.to_string()),
                 position,
-                resolved_target: None,
+                target_vault: None, resolved_target: None,
                 is_valid: true,
             })
         })
@@ -133,7 +133,7 @@ pub fn parse_markdown_links_indexed(content: &str, index: &LineIndex) -> Vec<Lin
                 target: url.to_string(),
                 display_text: Some(text.to_string()),
                 position,
-                resolved_target: None,
+                target_vault: None, resolved_target: None,
                 is_valid: true,
             })
         })

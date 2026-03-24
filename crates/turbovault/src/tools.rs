@@ -2585,57 +2585,57 @@ impl ObsidianMcpServer {
 
     // ==================== Locking ====================
 
-    // /// Acquire a lock on a file
-    // #[tool(
-    //     description = "Acquire a lock on a file for collaborative editing",
-    //     usage = "Use before starting a long-running edit session or to prevent concurrent modifications by other agents. Provide an owner ID (e.g., your name or session ID).",
-    //     performance = "Fast (<10ms). Locks are advisory and stored in memory.",
-    //     related = ["release_lock", "check_lock", "write_note"],
-    //     examples = ["acquire_lock(path='notes/important.md', owner='Agent-Alice')"]
-    // )]
-    // async fn acquire_lock(
-    //     &self,
-    //     path: String,
-    //     owner: String,
-    //     timeout: Option<u64>,
-    // ) -> McpResult<serde_json::Value> {
-    //     let (vault_name, manager) = self.get_vault_pair().await?;
-    //     let tools = LockTools::new(manager);
-    //     let lock = tools.acquire_lock(path, owner, timeout).await.map_err(to_mcp_error)?;
-    //     StandardResponse::new(vault_name, "acquire_lock", serde_json::to_value(lock)?)
-    //         .with_next_step("write_note")
-    //         .with_next_step("release_lock")
-    //         .to_json()
-    // }
+    /// Acquire a lock on a file
+    #[tool(
+        description = "Acquire a lock on a file for collaborative editing",
+        usage = "Use before starting a long-running edit session or to prevent concurrent modifications by other agents. Provide an owner ID (e.g., your name or session ID).",
+        performance = "Fast (<10ms). Locks are advisory and stored in memory.",
+        related = ["release_lock", "check_lock", "write_note"],
+        examples = ["acquire_lock(path='notes/important.md', owner='Agent-Alice')"]
+    )]
+    async fn acquire_lock(
+        &self,
+        path: String,
+        owner: String,
+        timeout: Option<u64>,
+    ) -> McpResult<serde_json::Value> {
+        let (vault_name, manager) = self.get_vault_pair().await?;
+        let tools = LockTools::new(manager);
+        let lock = tools.acquire_lock(path, owner, timeout).await.map_err(to_mcp_error)?;
+        StandardResponse::new(vault_name, "acquire_lock", lock)
+            .with_next_step("write_note")
+            .with_next_step("release_lock")
+            .to_json()
+    }
 
-    // /// Release a lock on a file
-    // #[tool(
-    //     description = "Release a previously acquired lock on a file",
-    //     usage = "Call this after completing your edits to allow other agents to modify the file.",
-    //     performance = "Fast (<10ms).",
-    //     related = ["acquire_lock", "check_lock"],
-    //     examples = ["release_lock(path='notes/important.md', owner='Agent-Alice')"]
-    // )]
-    // async fn release_lock(&self, path: String, owner: String) -> McpResult<serde_json::Value> {
-    //     let (vault_name, manager) = self.get_vault_pair().await?;
-    //     let tools = LockTools::new(manager);
-    //     tools.release_lock(path, owner).await.map_err(to_mcp_error)?;
-    //     StandardResponse::new(vault_name, "release_lock", serde_json::json!({"status": "released"}))
-    //         .to_json()
-    // }
+    /// Release a lock on a file
+    #[tool(
+        description = "Release a previously acquired lock on a file",
+        usage = "Call this after completing your edits to allow other agents to modify the file.",
+        performance = "Fast (<10ms).",
+        related = ["acquire_lock", "check_lock"],
+        examples = ["release_lock(path='notes/important.md', owner='Agent-Alice')"]
+    )]
+    async fn release_lock(&self, path: String, owner: String) -> McpResult<serde_json::Value> {
+        let (vault_name, manager) = self.get_vault_pair().await?;
+        let tools = LockTools::new(manager);
+        tools.release_lock(path, owner).await.map_err(to_mcp_error)?;
+        StandardResponse::new(vault_name, "release_lock", serde_json::json!({"status": "released"}))
+            .to_json()
+    }
 
-    // /// Check if a file is locked
-    // #[tool(
-    //     description = "Check if a file is currently locked and by whom",
-    //     usage = "Use to verify if you can safely acquire a lock or to see who is currently editing a file.",
-    //     performance = "Fast (<10ms).",
-    //     related = ["acquire_lock", "release_lock"],
-    //     examples = ["check_lock(path='notes/important.md')"]
-    // )]
-    // async fn check_lock(&self, path: String) -> McpResult<serde_json::Value> {
-    //     let (vault_name, manager) = self.get_vault_pair().await?;
-    //     let tools = LockTools::new(manager);
-    //     let lock = tools.check_lock(path).await.map_err(to_mcp_error)?;
-    //     StandardResponse::new(vault_name, "check_lock", serde_json::to_value(lock)?).to_json()
-    // }
+    /// Check if a file is locked
+    #[tool(
+        description = "Check if a file is currently locked and by whom",
+        usage = "Use to verify if you can safely acquire a lock or to see who is currently editing a file.",
+        performance = "Fast (<10ms).",
+        related = ["acquire_lock", "release_lock"],
+        examples = ["check_lock(path='notes/important.md')"]
+    )]
+    async fn check_lock(&self, path: String) -> McpResult<serde_json::Value> {
+        let (vault_name, manager) = self.get_vault_pair().await?;
+        let tools = LockTools::new(manager);
+        let lock = tools.check_lock(path).await.map_err(to_mcp_error)?;
+        StandardResponse::new(vault_name, "check_lock", lock).to_json()
+    }
 }

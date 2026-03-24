@@ -170,6 +170,7 @@ pub struct Link {
     pub type_: LinkType,
     pub source_file: PathBuf,
     pub target: String,
+    pub target_vault: Option<String>,
     pub display_text: Option<String>,
     pub position: SourcePosition,
     pub resolved_target: Option<PathBuf>,
@@ -182,19 +183,22 @@ impl Link {
         type_: LinkType,
         source_file: PathBuf,
         target: String,
+        target_vault: Option<String>,
+        display_text: Option<String>,
         position: SourcePosition,
     ) -> Self {
         Self {
             type_,
             source_file,
             target,
-            display_text: None,
+            target_vault,
+            display_text,
             position,
             resolved_target: None,
             is_valid: true,
         }
     }
-}
+
 
 /// A heading in vault content
 #[derive(Debug, Clone, Serialize, Deserialize)]

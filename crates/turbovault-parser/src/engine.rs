@@ -20,7 +20,7 @@ use turbovault_core::{
 
 use crate::ParseOptions;
 use crate::blocks::slugify;
-use crate::parsers::link_utils::{classify_url, classify_wikilink};
+use crate::parsers::link_utils::{classify_url, classify_wikilink, parse_vault_prefix};
 
 // ============================================================================
 // Compiled regex patterns (LazyLock for Rust 1.80+ SOTA)
@@ -415,7 +415,7 @@ impl<'a> ParseEngine<'a> {
                                 link_start,
                                 range.end - link_start,
                             ),
-                            resolved_target: None,
+                            target_vault: None, resolved_target: None,
                             is_valid: true,
                         });
                     }
@@ -466,7 +466,8 @@ impl<'a> ParseEngine<'a> {
             }
 
             let raw_target = caps.get(1).unwrap().as_str();
-            let (target, display_text) = parse_link_target(raw_target);
+            let (raw_name, display_text) = parse_link_target(raw_target);
+            let (target_vault, target) = parse_vault_prefix(&raw_name);
             let link_type = classify_wikilink(&target);
 
             result.wikilinks.push(Link {
@@ -479,6 +480,7 @@ impl<'a> ParseEngine<'a> {
                     global_start,
                     full_match.len(),
                 ),
+                target_vault,
                 resolved_target: None,
                 is_valid: true,
             });
@@ -513,7 +515,8 @@ impl<'a> ParseEngine<'a> {
             }
 
             let raw_target = caps.get(1).unwrap().as_str();
-            let (target, display_text) = parse_link_target(raw_target);
+            let (raw_name, display_text) = parse_link_target(raw_target);
+            let (target_vault, target) = parse_vault_prefix(&raw_name);
 
             result.embeds.push(Link {
                 type_: LinkType::Embed,
@@ -525,6 +528,7 @@ impl<'a> ParseEngine<'a> {
                     global_start,
                     full_match.len(),
                 ),
+                target_vault,
                 resolved_target: None,
                 is_valid: true,
             });
@@ -565,7 +569,8 @@ impl<'a> ParseEngine<'a> {
             }
 
             let raw_target = caps.get(1).unwrap().as_str();
-            let (target, display_text) = parse_link_target(raw_target);
+            let (raw_name, display_text) = parse_link_target(raw_target);
+            let (target_vault, target) = parse_vault_prefix(&raw_name);
             let link_type = classify_wikilink(&target);
 
             result.wikilinks.push(Link {
@@ -578,6 +583,7 @@ impl<'a> ParseEngine<'a> {
                     global_start,
                     full_match.len(),
                 ),
+                target_vault,
                 resolved_target: None,
                 is_valid: true,
             });
@@ -589,7 +595,8 @@ impl<'a> ParseEngine<'a> {
             let global_start = full_match.start();
 
             let raw_target = caps.get(1).unwrap().as_str();
-            let (target, display_text) = parse_link_target(raw_target);
+            let (raw_name, display_text) = parse_link_target(raw_target);
+            let (target_vault, target) = parse_vault_prefix(&raw_name);
 
             result.embeds.push(Link {
                 type_: LinkType::Embed,
@@ -601,6 +608,7 @@ impl<'a> ParseEngine<'a> {
                     global_start,
                     full_match.len(),
                 ),
+                target_vault,
                 resolved_target: None,
                 is_valid: true,
             });

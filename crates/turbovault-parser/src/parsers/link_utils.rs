@@ -96,6 +96,29 @@ pub fn classify_wikilink(target: &str) -> LinkType {
     }
 }
 
+/// Parse an optional vault prefix from a link target (e.g. `[[vault:Note]]`)
+pub fn parse_vault_prefix(target: &str) -> (Option<String>, String) {
+    if let Some(colon_idx) = target.find(':') {
+        let vault = &target[..colon_idx];
+        let sub_target = &target[colon_idx + 1..];
+
+        // Only treat as cross-vault if vault name is not empty and doesn't contain path separators
+        // and doesn't look like a common protocol or URI scheme
+        if !vault.is_empty()
+            && !vault.contains('/')
+            && !vault.contains('\\')
+            && !matches!(
+                vault.to_lowercase().as_str(),
+                "http" | "https" | "mailto" | "tel" | "obsidian" | "zotero" | "file"
+            )
+        {
+            return (Some(vault.to_string()), sub_target.to_string());
+        }
+    }
+
+    (None, target.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

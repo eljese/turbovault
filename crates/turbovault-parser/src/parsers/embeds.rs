@@ -44,7 +44,7 @@ pub fn parse_embeds(content: &str, source_file: &Path) -> Vec<Link> {
                     full_match.start(),
                     full_match.len(),
                 ),
-                resolved_target: None,
+                target_vault: None, resolved_target: None,
                 is_valid: true,
             }
         })
@@ -83,7 +83,7 @@ pub fn parse_embeds_indexed(content: &str, source_file: &Path, index: &LineIndex
                     full_match.start(),
                     full_match.len(),
                 ),
-                resolved_target: None,
+                target_vault: None, resolved_target: None,
                 is_valid: true,
             }
         })
