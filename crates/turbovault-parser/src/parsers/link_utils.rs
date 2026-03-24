@@ -28,6 +28,11 @@ use turbovault_core::LinkType;
 /// assert_eq!(classify_url("./docs/api.md"), LinkType::MarkdownLink);
 /// ```
 pub fn classify_url(url: &str) -> LinkType {
+    // Cross-vault links (obsidian URI)
+    if url.starts_with("obsidian://") {
+        return LinkType::CrossVaultLink;
+    }
+
     // External links first (most specific match)
     if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("mailto:") {
         return LinkType::ExternalLink;
@@ -105,6 +110,18 @@ mod tests {
         assert_eq!(
             classify_url("mailto:user@example.com"),
             LinkType::ExternalLink
+        );
+    }
+
+    #[test]
+    fn test_classify_url_cross_vault() {
+        assert_eq!(
+            classify_url("obsidian://vault/OtherVault/Note"),
+            LinkType::CrossVaultLink
+        );
+        assert_eq!(
+            classify_url("obsidian://open?vault=OtherVault&file=Note"),
+            LinkType::CrossVaultLink
         );
     }
 

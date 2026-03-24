@@ -30,6 +30,7 @@ pub struct VaultManager {
     parser: Parser,
     link_graph: Arc<RwLock<LinkGraph>>,
     file_cache: Arc<RwLock<HashMap<PathBuf, CacheEntry>>>,
+    locks: Arc<RwLock<HashMap<PathBuf, Lock>>>,
     audit_log: Option<Arc<AuditLog>>,
     snapshot_store: Option<Arc<SnapshotStore>>,
 }
@@ -46,6 +47,7 @@ impl VaultManager {
             parser,
             link_graph: Arc::new(RwLock::new(LinkGraph::new())),
             file_cache: Arc::new(RwLock::new(HashMap::new())),
+            locks: Arc::new(RwLock::new(HashMap::new())),
             audit_log: None,
             snapshot_store: None,
         })
@@ -70,6 +72,94 @@ impl VaultManager {
     /// Get the snapshot store reference (if configured)
     pub fn snapshot_store(&self) -> Option<&Arc<SnapshotStore>> {
         self.snapshot_store.as_ref()
+    }
+
+    /// Acquire a lock on a file
+    #[instrument(skip(self), fields(file = ?path, owner = %owner), name = "vault_acquire_lock")]
+    pub async fn acquire_lock(&self, path: &Path, owner: &str, timeout: Option<f64>) -> Result<Lock> {
+        let vault_path = self.resolve_path(path)?;
+        let mut locks = self.locks.write().await;
+
+        let now = self.current_timestamp();
+
+        // Check if already locked
+        if let Some(existing_lock) = locks.get(&vault_path) {
+            if !existing_lock.is_expired(now) && existing_lock.owner != owner {
+                return Err(Error::concurrency_error(format!(
+                    "File is already locked by {}",
+                    existing_lock.owner
+                )));
+            }
+        }
+
+        // Create and store new lock
+        let lock = Lock::new(vault_path.clone(), owner.to_string(), now, timeout);
+        locks.insert(vault_path, lock.clone());
+
+        log::info!("Lock acquired for {:?} by {}", path, owner);
+        Ok(lock)
+    }
+
+    /// Release a lock on a file
+    #[instrument(skip(self), fields(file = ?path, owner = %owner), name = "vault_release_lock")]
+    pub async fn release_lock(&self, path: &Path, owner: &str) -> Result<()> {
+        let vault_path = self.resolve_path(path)?;
+        let mut locks = self.locks.write().await;
+
+        if let Some(lock) = locks.get(&vault_path) {
+            if lock.owner != owner {
+                return Err(Error::concurrency_error(format!(
+                    "Cannot release lock owned by {}",
+                    lock.owner
+                )));
+            }
+            locks.remove(&vault_path);
+            log::info!("Lock released for {:?} by {}", path, owner);
+        }
+
+        Ok(())
+    }
+
+    /// Check if a file is locked and if the caller is the owner
+    pub async fn check_lock(&self, path: &Path, owner: Option<&str>) -> Result<()> {
+        let vault_path = self.resolve_path(path)?;
+        let locks = self.locks.read().await;
+
+        if let Some(lock) = locks.get(&vault_path) {
+            let now = self.current_timestamp();
+            if !lock.is_expired(now) {
+                if let Some(owner_name) = owner {
+                    if lock.owner != owner_name {
+                        return Err(Error::concurrency_error(format!(
+                            "File is locked by {}",
+                            lock.owner
+                        )));
+                    }
+                } else {
+                    return Err(Error::concurrency_error(format!(
+                        "File is locked by {}",
+                        lock.owner
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get current lock for a file
+    pub async fn get_lock(&self, path: &Path) -> Result<Option<Lock>> {
+        let vault_path = self.resolve_path(path)?;
+        let locks = self.locks.read().await;
+
+        if let Some(lock) = locks.get(&vault_path) {
+            let now = self.current_timestamp();
+            if !lock.is_expired(now) {
+                return Ok(Some(lock.clone()));
+            }
+        }
+
+        Ok(None)
     }
 
     /// Initialize vault by scanning all files

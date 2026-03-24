@@ -314,6 +314,7 @@ impl SearchQuery {
             .map_err(|e| Error::config_error(format!("Search failed: {}", e)))?;
 
         let mut results = Vec::new();
+        let mut seen_paths = std::collections::HashSet::new();
 
         for (score, doc_address) in top_docs {
             // Retrieve the stored document from the index
@@ -335,6 +336,11 @@ impl SearchQuery {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_default();
+
+            // Deduplicate by path
+            if !seen_paths.insert(path.clone()) {
+                continue;
+            }
 
             let title = doc_json
                 .get("title")

@@ -160,6 +160,8 @@ pub enum LinkType {
     MarkdownLink,
     /// External URL: `http://...`, `https://...`, `mailto:...`
     ExternalLink,
+    /// Cross-vault link: `obsidian://vault/VaultName/Note`
+    CrossVaultLink,
 }
 
 /// A link in vault content
@@ -561,6 +563,41 @@ pub struct FileMetadata {
     pub modified_at: f64,
     pub checksum: String,
     pub is_attachment: bool,
+}
+
+/// Advisory lock for collaborative editing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Lock {
+    /// Relative path to the locked file
+    pub path: PathBuf,
+    /// Owner of the lock (session ID or user name)
+    pub owner: String,
+    /// Unix timestamp when the lock was acquired
+    pub acquired_at: f64,
+    /// Optional timeout in seconds after which the lock expires
+    pub expires_at: Option<f64>,
+}
+
+impl Lock {
+    /// Create a new lock
+    pub fn new(path: PathBuf, owner: String, acquired_at: f64, timeout: Option<f64>) -> Self {
+        let expires_at = timeout.map(|t| acquired_at + t);
+        Self {
+            path,
+            owner,
+            acquired_at,
+            expires_at,
+        }
+    }
+
+    /// Check if the lock has expired
+    pub fn is_expired(&self, current_time: f64) -> bool {
+        if let Some(expires) = self.expires_at {
+            current_time > expires
+        } else {
+            false
+        }
+    }
 }
 
 /// A complete vault file with parsed content

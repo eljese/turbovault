@@ -290,6 +290,56 @@ pub fn obsidian_uri(vault_name: &str, file_path: &str) -> String {
     )
 }
 
+/// Parse an Obsidian URI into vault name and file path.
+/// Returns (vault_name, file_path) if valid, None otherwise.
+pub fn parse_obsidian_uri(uri: &str) -> Option<(String, String)> {
+    if !uri.starts_with("obsidian://") {
+        return None;
+    }
+
+    if uri.starts_with("obsidian://open?") {
+        let parts: Vec<&str> = uri.split('?').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+
+        let query = parts[1];
+        let mut vault = None;
+        let mut file = None;
+
+        for param in query.split('&') {
+            if let Some((k, v)) = param.split_once('=') {
+                if k == "vault" {
+                    vault = Some(urlencoding::decode(v).unwrap_or_default().to_string());
+                } else if k == "file" {
+                    // Obsidian URIs often omit .md extension
+                    let mut decoded = urlencoding::decode(v).unwrap_or_default().to_string();
+                    if !decoded.ends_with(".md") && !decoded.contains('.') {
+                        decoded.push_str(".md");
+                    }
+                    file = Some(decoded);
+                }
+            }
+        }
+
+        if let (Some(v), Some(f)) = (vault, file) {
+            return Some((v, f));
+        }
+    } else if uri.starts_with("obsidian://vault/") {
+        let path_part = uri.strip_prefix("obsidian://vault/")?;
+        if let Some((v, f)) = path_part.split_once('/') {
+            let vault = urlencoding::decode(v).unwrap_or_default().to_string();
+            let mut file = urlencoding::decode(f).unwrap_or_default().to_string();
+            if !file.ends_with(".md") && !file.contains('.') {
+                file.push_str(".md");
+            }
+            return Some((vault, file));
+        }
+    }
+
+    None
+}
+
 /// Find the end position of YAML frontmatter block (including closing ---)
 /// Returns the byte offset just after the closing "---\n" (or "---\r\n")
 fn find_frontmatter_end(content: &str) -> Option<usize> {
@@ -488,6 +538,26 @@ mod tests {
     fn test_obsidian_uri_no_extension() {
         let uri = obsidian_uri("vault", "folder/note");
         assert_eq!(uri, "obsidian://open?vault=vault&file=folder%2Fnote");
+    }
+
+    #[test]
+    fn test_parse_obsidian_uri() {
+        assert_eq!(
+            parse_obsidian_uri("obsidian://open?vault=My%20Vault&file=daily%2F2024-01-15"),
+            Some(("My Vault".to_string(), "daily/2024-01-15.md".to_string()))
+        );
+        assert_eq!(
+            parse_obsidian_uri("obsidian://vault/My%20Vault/daily%2F2024-01-15"),
+            Some(("My Vault".to_string(), "daily/2024-01-15.md".to_string()))
+        );
+        assert_eq!(
+            parse_obsidian_uri("obsidian://open?vault=vault&file=folder%2Fnote.md"),
+            Some(("vault".to_string(), "folder/note.md".to_string()))
+        );
+        assert_eq!(
+            parse_obsidian_uri("invalid_uri"),
+            None
+        );
     }
 
     #[test]
