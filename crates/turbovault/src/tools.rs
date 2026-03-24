@@ -471,13 +471,14 @@ impl ObsidianMcpServer {
 
     /// Read the contents of a note
     #[tool(
-        description = "Read complete markdown content of a note from active vault",
-        usage = "Use before editing, analyzing, or displaying notes. Supports all Obsidian Flavored Markdown syntax including wikilinks [[note]], embeds ![[image.png]], and block references ^block-id",
+        name = "read_full_note",
+        description = "Reads the entire raw Markdown content of a single specific Obsidian note. ONLY use this if 'search_vault_summaries' indicates the full text is strictly necessary to answer the user's prompt.",
+        usage = "Use only after identifying a specific note via search_vault_summaries that requires full deep reading.",
         performance = "Fast (<10ms typical). Returns path, content, and content hash for conflict detection",
         related = ["write_note", "edit_note", "get_backlinks"],
         examples = ["daily/2024-01-15.md", "projects/website-redesign.md"]
     )]
-    async fn read_note(&self, path: String) -> McpResult<serde_json::Value> {
+    async fn read_full_note(&self, path: String) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = FileTools::new(manager);
         let content = tools.read_file(&path).await.map_err(to_mcp_error)?;
@@ -488,7 +489,7 @@ impl ObsidianMcpServer {
         let uri = obsidian_uri(&vault_name, &path);
         StandardResponse::new(
             &vault_name,
-            "read_note",
+            "read_full_note",
             serde_json::json!({"path": path, "content": content, "hash": hash, "uri": uri}),
         )
         .with_read_next_steps()
@@ -1036,26 +1037,39 @@ impl ObsidianMcpServer {
     // ==================== Search (LLM Discovery) ====================
 
     /// Search vault by keyword
+    /// Search for vault summaries
     #[tool(
-        description = "Full-text search across all notes using Tantivy search engine with BM25 ranking",
-        usage = "Use for discovering content by keywords. Case-insensitive, supports phrase queries with quotes. For filtered searches, use advanced_search",
-        performance = "<100ms on 10k notes, <500ms on 100k notes",
-        related = ["advanced_search", "recommend_related", "query_metadata"],
-        examples = ["\"project alpha\"", "authentication", "urgent tasks"]
+        name = "search_vault_summaries",
+        description = "Searches the Obsidian vault for relevant context. Returns ONLY a lightweight array containing the 'file_path', 'tags', and a brief 200-character 'summary' of the matching notes. Use this to locate information without loading full files.",
+        usage = "Default tool for 95% of vault interactions. Use to find relevant notes before deciding if read_full_note is needed.",
+        performance = "<100ms typical. Optimized for minimal token usage.",
+        related = ["read_full_note", "advanced_search", "query_metadata"],
+        examples = ["search_term: 'deployment', max_results: 5"]
     )]
-    async fn search(&self, query: String) -> McpResult<serde_json::Value> {
+    async fn search_vault_summaries(&self, search_term: String, max_results: Option<usize>) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let engine = SearchEngine::new(manager).await.map_err(to_mcp_error)?;
-        let results = engine.search(&query).await.map_err(to_mcp_error)?;
+        
+        let limit = max_results.unwrap_or(5).min(5);
+        let results = engine.search(&search_term).await.map_err(to_mcp_error)?;
+        
+        // Take only the top N and strip extra data to ensure lightweight response
+        let summaries: Vec<_> = results.into_iter()
+            .take(limit)
+            .map(|r| serde_json::json!({
+                "file_path": r.path,
+                "tags": r.tags,
+                "summary": r.preview
+            }))
+            .collect();
 
-        let result_data =
-            serde_json::to_value(&results).map_err(|e| McpError::internal(e.to_string()))?;
-        let count = extract_count(&result_data);
+        let result_data = serde_json::to_value(&summaries).map_err(|e| McpError::internal(e.to_string()))?;
+        let count = summaries.len();
 
-        let response = StandardResponse::new(vault_name, "search", result_data)
+        let response = StandardResponse::new(vault_name, "search_vault_summaries", result_data)
             .with_count(count)
-            .with_next_step("advanced_search")
-            .with_next_step("recommend_related");
+            .with_next_step("read_full_note")
+            .with_next_step("advanced_search");
 
         response.to_json()
     }
