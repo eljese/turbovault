@@ -22,7 +22,7 @@ turbovault-audit = { workspace = true }
 # MCP server framework
 # Note: No features needed here - tools crate only defines tool implementations
 # Transport features are handled by the main turbovault binary
-turbomcp = { version = "3.0.8" }
+turbomcp = { version = "3.0.9" }
 
 tokio = { workspace = true }
 serde = { workspace = true }

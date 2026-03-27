@@ -5,15 +5,18 @@ All notable changes to TurboVault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.10] - 2026-03-26
+## [1.2.11] - 2026-03-26
 
 ### Added
 
+- **Multi-version MCP protocol support**: TurboVault now accepts clients requesting either MCP `2025-06-18` or `2025-11-25` specification versions. The server negotiates the protocol version during the `initialize` handshake and filters responses through a version adapter that strips fields not present in the older spec (icons, execution, outputSchema, tasks capability). Powered by TurboMCP v3.0.9's `ProtocolConfig::multi_version()`.
+- **MCP session lifecycle enforcement**: All line-based transports (STDIO, TCP, Unix) enforce the MCP initialization lifecycle — requests before a successful `initialize` are rejected, and duplicate `initialize` requests are rejected. WebSocket and HTTP transports also enforce per-connection/session version tracking.
 - **Auto-create missing vault directories**: `VaultConfig::validate()` and the `add_vault` MCP tool now create missing vault directories with `create_dir_all` instead of returning an error, enabling seamless first-run setup.
 
 ### Changed
 
-- **Upgraded TurboMCP to v3.0.8**: Migration from TurboMCP v3.0.0 to v3.0.8, adopting the new `ProtocolVersion` enum and version adapter infrastructure for future multi-version MCP protocol support.
+- **Upgraded TurboMCP to v3.0.9**: Full migration from TurboMCP v3.0.0 to v3.0.9, adopting the `ProtocolVersion` enum, version adapter layer, `route_request_versioned()` API, and builder pattern with `ProtocolConfig::multi_version()` for spec-compliant multi-version response filtering.
+- **Server startup uses builder pattern**: Replaced `server.run_stdio()` with `server.builder().with_protocol(ProtocolConfig::multi_version()).serve()` across all transports, enabling runtime protocol configuration.
 - **Removed phantom `turbomcp-server` dependency**: The direct `turbomcp-server` dep (which existed only to activate the STDIO feature via default feature resolution) was replaced with an explicit `features = ["stdio", "telemetry"]` on the `turbomcp` dependency, making intent clear and preventing accidental feature loss.
 
 ### Fixed
@@ -231,6 +234,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Atomic file operations with rollback support
 - Configuration profiles (development, production, readonly, high-performance)
 
+[1.2.11]: https://github.com/epistates/turbovault/compare/v1.2.10...v1.2.11
 [1.2.10]: https://github.com/epistates/turbovault/compare/v1.2.9...v1.2.10
 [1.2.9]: https://github.com/epistates/turbovault/compare/v1.2.8...v1.2.9
 [1.2.8]: https://github.com/epistates/turbovault/compare/v1.2.7...v1.2.8

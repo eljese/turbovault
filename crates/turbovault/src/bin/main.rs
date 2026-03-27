@@ -2,8 +2,8 @@
 
 use clap::Parser;
 use std::path::PathBuf;
-use turbomcp::McpHandlerExt;
 use turbomcp::telemetry::TelemetryConfig;
+use turbomcp::{McpServerExt, ProtocolConfig};
 use turbovault::ObsidianMcpServer;
 use turbovault_core::VaultConfig;
 use turbovault_core::cache::VaultCache;
@@ -280,43 +280,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         log::info!("Available tools: add_vault, list_vaults, set_active_vault");
     }
 
-    // Start server with appropriate transport.
-    // TODO: Use builder pattern with ProtocolConfig::multi_version() once turbomcp
-    // publishes the transport-layer multi-version support (with_protocol, session state).
-    log::info!("Starting TurboVault Server");
+    // Start server with multi-version protocol support.
+    // Accepts both MCP 2025-06-18 and 2025-11-25 clients.
+    log::info!("Starting TurboVault Server (multi-version MCP protocol)");
 
     match args.transport.as_str() {
         "stdio" => {
             log::info!("Running in STDIO mode for MCP protocol");
-            server.run_stdio().await?;
+            server
+                .builder()
+                .with_protocol(ProtocolConfig::multi_version())
+                .serve()
+                .await?;
         }
         #[cfg(feature = "http")]
         "http" => {
             let addr = format!("127.0.0.1:{}", args.port);
             log::info!("Running HTTP server on {}", addr);
             log::info!("Output format: {:?}", output_format);
-            server.run_http(&addr).await?;
+            server
+                .builder()
+                .with_protocol(ProtocolConfig::multi_version())
+                .transport(turbomcp::Transport::http(&addr))
+                .serve()
+                .await?;
         }
         #[cfg(feature = "websocket")]
         "websocket" => {
             let addr = format!("127.0.0.1:{}", args.port);
             log::info!("Running WebSocket server on {}", addr);
             log::info!("Output format: {:?}", output_format);
-            server.run_websocket(&addr).await?;
+            server
+                .builder()
+                .with_protocol(ProtocolConfig::multi_version())
+                .transport(turbomcp::Transport::websocket(&addr))
+                .serve()
+                .await?;
         }
         #[cfg(feature = "tcp")]
         "tcp" => {
             let addr = format!("127.0.0.1:{}", args.port);
             log::info!("Running TCP server on {}", addr);
             log::info!("Output format: {:?}", output_format);
-            server.run_tcp(&addr).await?;
+            server
+                .builder()
+                .with_protocol(ProtocolConfig::multi_version())
+                .transport(turbomcp::Transport::tcp(&addr))
+                .serve()
+                .await?;
         }
         #[cfg(feature = "unix")]
         "unix" => {
             let socket_path = "/tmp/turbovault.sock".to_string();
             log::info!("Running Unix socket server on {}", socket_path);
             log::info!("Output format: {:?}", output_format);
-            server.run_unix(&socket_path).await?;
+            server
+                .builder()
+                .with_protocol(ProtocolConfig::multi_version())
+                .transport(turbomcp::Transport::unix(&socket_path))
+                .serve()
+                .await?;
         }
         transport => {
             #[cfg(not(feature = "http"))]

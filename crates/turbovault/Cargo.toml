@@ -54,7 +54,7 @@ turbovault-audit = { workspace = true }
 turbovault-tools = { workspace = true }
 
 # MCP server framework (features passed through from turbovault)
-turbomcp = { version = "3.0.8", features = ["stdio", "telemetry"] }
+turbomcp = { version = "3.0.9", features = ["stdio", "telemetry"] }
 
 shellexpand = { workspace = true }
 tokio = { workspace = true }
