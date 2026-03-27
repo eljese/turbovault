@@ -54,9 +54,9 @@ turbovault-audit = { workspace = true }
 turbovault-tools = { workspace = true }
 
 # MCP server framework (features passed through from turbovault)
-turbomcp = { version = "3.0.0", features = ["telemetry"] }
-turbomcp-server = { version = "3.0.0" }
+turbomcp = { version = "3.0.10", features = ["stdio", "telemetry"] }
 
+shellexpand = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

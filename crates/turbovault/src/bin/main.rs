@@ -2,8 +2,8 @@
 
 use clap::Parser;
 use std::path::PathBuf;
-use turbomcp::McpHandlerExt;
 use turbomcp::telemetry::TelemetryConfig;
+use turbomcp::{McpServerExt, ProtocolConfig};
 use turbovault::ObsidianMcpServer;
 use turbovault_core::VaultConfig;
 use turbovault_core::cache::VaultCache;
@@ -223,6 +223,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Optionally add a vault at startup (for convenience)
     if let Some(vault_path) = args.vault {
+        // Expand tilde and environment variables in the path
+        let vault_path = PathBuf::from(
+            shellexpand::full(&vault_path.to_string_lossy())
+                .map_err(|e| format!("Failed to expand vault path: {}", e))?
+                .into_owned(),
+        );
         log::info!("Adding vault from CLI argument: {:?}", vault_path);
 
         // Check if a vault named "default" already exists (e.g., from cache recovery)
@@ -282,45 +288,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         log::info!("Available tools: add_vault, list_vaults, set_active_vault");
     }
 
-    // Start server with appropriate transport
-    log::info!("Starting TurboVault Server");
+    // Start server with multi-version protocol support.
+    // Accepts both MCP 2025-06-18 and 2025-11-25 clients.
+    log::info!("Starting TurboVault Server (multi-version MCP protocol)");
 
     match args.transport.as_str() {
         "stdio" => {
             log::info!("Running in STDIO mode for MCP protocol");
-            server.run_stdio().await?;
+            server
+                .builder()
+                .with_protocol(ProtocolConfig::multi_version())
+                .serve()
+                .await?;
         }
         #[cfg(feature = "http")]
         "http" => {
             let addr = format!("{}:{}", args.host, args.port);
             log::info!("Running HTTP server on {}", addr);
             log::info!("Output format: {:?}", output_format);
-            // TODO: Apply output_format to HTTP responses
-            server.run_http(&addr).await?;
+            server
+                .builder()
+                .with_protocol(ProtocolConfig::multi_version())
+                .transport(turbomcp::Transport::http(&addr))
+                .serve()
+                .await?;
         }
         #[cfg(feature = "websocket")]
         "websocket" => {
             let addr = format!("{}:{}", args.host, args.port);
             log::info!("Running WebSocket server on {}", addr);
             log::info!("Output format: {:?}", output_format);
-            // TODO: Apply output_format to WebSocket responses
-            server.run_websocket(&addr).await?;
+            server
+                .builder()
+                .with_protocol(ProtocolConfig::multi_version())
+                .transport(turbomcp::Transport::websocket(&addr))
+                .serve()
+                .await?;
         }
         #[cfg(feature = "tcp")]
         "tcp" => {
             let addr = format!("{}:{}", args.host, args.port);
             log::info!("Running TCP server on {}", addr);
             log::info!("Output format: {:?}", output_format);
-            // TODO: Apply output_format to TCP responses
-            server.run_tcp(&addr).await?;
+            server
+                .builder()
+                .with_protocol(ProtocolConfig::multi_version())
+                .transport(turbomcp::Transport::tcp(&addr))
+                .serve()
+                .await?;
         }
         #[cfg(feature = "unix")]
         "unix" => {
             let socket_path = "/tmp/turbovault.sock".to_string();
             log::info!("Running Unix socket server on {}", socket_path);
             log::info!("Output format: {:?}", output_format);
-            // TODO: Apply output_format to Unix socket responses
-            server.run_unix(&socket_path).await?;
+            server
+                .builder()
+                .with_protocol(ProtocolConfig::multi_version())
+                .transport(turbomcp::Transport::unix(&socket_path))
+                .serve()
+                .await?;
         }
         transport => {
             #[cfg(not(feature = "http"))]

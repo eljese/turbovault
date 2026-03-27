@@ -139,10 +139,20 @@ impl VaultLifecycleTools {
         // Expand tilde and convert to absolute path
         let expanded_path = Self::expand_path(path)?;
 
-        // Verify path exists and is directory
-        if !expanded_path.exists() || !expanded_path.is_dir() {
+        // Create the directory if it doesn't exist
+        if !expanded_path.exists() {
+            std::fs::create_dir_all(&expanded_path).map_err(|e| {
+                Error::invalid_path(format!(
+                    "Path does not exist and could not be created: {} ({})",
+                    expanded_path.display(),
+                    e
+                ))
+            })?;
+        }
+
+        if !expanded_path.is_dir() {
             return Err(Error::invalid_path(format!(
-                "Path does not exist or is not a directory: {}",
+                "Path is not a directory: {}",
                 expanded_path.display()
             )));
         }

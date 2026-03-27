@@ -42,10 +42,13 @@ impl VaultConfig {
         }
 
         if !self.path.exists() {
-            return Err(Error::config_error(format!(
-                "Vault path does not exist: {}",
-                self.path.display()
-            )));
+            std::fs::create_dir_all(&self.path).map_err(|e| {
+                Error::config_error(format!(
+                    "Vault path does not exist and could not be created: {} ({})",
+                    self.path.display(),
+                    e
+                ))
+            })?;
         }
 
         if !self.path.is_dir() {
@@ -106,9 +109,14 @@ impl VaultConfigBuilder {
 
     /// Build and validate
     pub fn build(self) -> Result<VaultConfig> {
+        // Expand tilde and environment variables in the path
+        let expanded_path = shellexpand::full(&self.path.to_string_lossy())
+            .map(|p| PathBuf::from(p.into_owned()))
+            .unwrap_or(self.path);
+
         let config = VaultConfig {
             name: self.name,
-            path: self.path,
+            path: expanded_path,
             is_default: self.is_default,
             watch_for_changes: self.watch_for_changes,
             max_file_size: self.max_file_size,
