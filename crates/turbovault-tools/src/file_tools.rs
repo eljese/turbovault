@@ -62,7 +62,7 @@ impl FileTools {
 
     /// Read a file from the vault
     pub async fn read_file(&self, path: &str) -> Result<String> {
-        let file_path = PathBuf::from(path);
+        let file_path = PathBuf::from(path.trim());
         self.manager.read_file(&file_path).await
     }
 
@@ -74,6 +74,7 @@ impl FileTools {
         mode: WriteMode,
         expected_hash: Option<&str>,
     ) -> Result<()> {
+        let path = path.trim();
         match mode {
             WriteMode::Overwrite => {
                 let file_path = PathBuf::from(path);
