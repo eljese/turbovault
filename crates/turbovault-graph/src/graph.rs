@@ -552,6 +552,7 @@ mod tests {
                 type_: LinkType::WikiLink,
                 source_file: PathBuf::from(path),
                 target: target.to_string(),
+                target_vault: None,
                 display_text: None,
                 position: SourcePosition::new(0, 0, i * 10, 10),
                 resolved_target: None,

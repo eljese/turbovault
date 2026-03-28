@@ -355,6 +355,7 @@ mod tests {
             type_: LinkType::WikiLink,
             source_file: PathBuf::from(source),
             target: target.to_string(),
+            target_vault: None,
             display_text: None,
             position: SourcePosition::start(),
             resolved_target: if is_valid {
