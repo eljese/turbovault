@@ -48,7 +48,8 @@ pub fn parse_wikilinks(content: &str, source_file: &Path) -> Vec<Link> {
                 target,
                 display_text,
                 position: SourcePosition::from_offset(content, start, full_match.len()),
-                target_vault: None, resolved_target: None,
+                target_vault: None,
+                resolved_target: None,
                 is_valid: true,
             })
         })
@@ -90,7 +91,8 @@ pub fn parse_wikilinks_indexed(content: &str, source_file: &Path, index: &LineIn
                 target,
                 display_text,
                 position: SourcePosition::from_offset_indexed(index, start, full_match.len()),
-                target_vault: None, resolved_target: None,
+                target_vault: None,
+                resolved_target: None,
                 is_valid: true,
             })
         })

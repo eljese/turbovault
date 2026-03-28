@@ -42,32 +42,35 @@ impl DirectorTools {
         let prompt_lower = prompt.to_lowercase();
 
         // Chief of Staff: Finance, Tasks, Planning
-        if prompt_lower.contains("finance") || 
-           prompt_lower.contains("cost") || 
-           prompt_lower.contains("budget") ||
-           prompt_lower.contains("task") ||
-           prompt_lower.contains("todo") {
+        if prompt_lower.contains("finance")
+            || prompt_lower.contains("cost")
+            || prompt_lower.contains("budget")
+            || prompt_lower.contains("task")
+            || prompt_lower.contains("todo")
+        {
             sub_agents.push("Chief of Staff".to_string());
             reasoning.push_str("Found planning/financial intent. ");
         }
 
         // The Global Architect: Infrastructure, Code, System Design
-        if prompt_lower.contains("infrastructure") || 
-           prompt_lower.contains("docker") || 
-           prompt_lower.contains("portainer") || 
-           prompt_lower.contains("rust") ||
-           prompt_lower.contains("refactor") ||
-           prompt_lower.contains("architecture") {
+        if prompt_lower.contains("infrastructure")
+            || prompt_lower.contains("docker")
+            || prompt_lower.contains("portainer")
+            || prompt_lower.contains("rust")
+            || prompt_lower.contains("refactor")
+            || prompt_lower.contains("architecture")
+        {
             sub_agents.push("The Global Architect".to_string());
             reasoning.push_str("Found structural/technical intent. ");
         }
 
         // The Scribe: Documentation, Memory
-        if prompt_lower.contains("document") || 
-           prompt_lower.contains("log") || 
-           prompt_lower.contains("note") ||
-           prompt_lower.contains("memory") ||
-           prompt_lower.contains("record") {
+        if prompt_lower.contains("document")
+            || prompt_lower.contains("log")
+            || prompt_lower.contains("note")
+            || prompt_lower.contains("memory")
+            || prompt_lower.contains("record")
+        {
             sub_agents.push("The Scribe".to_string());
             reasoning.push_str("Found documentation/archival intent. ");
         }
@@ -87,7 +90,7 @@ impl DirectorTools {
 
         // IAC via Neo4j :MESSAGE nodes (Future: actual implementation)
         // For now, we return the decision which the Orchestrator can then persist
-        
+
         Ok(json!({
             "operation": "DSR_RECRUITMENT",
             "status": "Success",
@@ -108,7 +111,7 @@ impl DirectorTools {
     pub async fn post_swarm_message(&self, from: &str, to: &str, content: &str) -> Result<Value> {
         // This tool simulates the creation of a :MESSAGE node in Neo4j
         // Logic: (Agent {name: from})-[:SENT]->(m:Message {content: content})-[:TO]->(Agent {name: to})
-        
+
         Ok(json!({
             "operation": "IAC_MESSAGE",
             "status": "Queued",

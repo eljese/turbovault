@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use turbovault_vault::VaultManager;
 use turbovault_core::prelude::*;
+use turbovault_vault::VaultManager;
 
 /// Lock tools context
 #[derive(Clone)]
@@ -35,16 +35,12 @@ impl LockTools {
     /// Release a lock on a file
     pub async fn release_lock(&self, path: String, owner: String) -> Result<()> {
         let file_path = PathBuf::from(path);
-        self.manager
-            .release_lock(&file_path, &owner)
-            .await
+        self.manager.release_lock(&file_path, &owner).await
     }
 
     /// Check the lock status of a file
     pub async fn check_lock(&self, path: String) -> Result<Option<Lock>> {
         let file_path = PathBuf::from(path);
-        self.manager
-            .get_lock(&file_path)
-            .await
+        self.manager.get_lock(&file_path).await
     }
 }

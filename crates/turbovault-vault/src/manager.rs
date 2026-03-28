@@ -76,7 +76,12 @@ impl VaultManager {
 
     /// Acquire a lock on a file
     #[instrument(skip(self), fields(file = ?path, owner = %owner), name = "vault_acquire_lock")]
-    pub async fn acquire_lock(&self, path: &Path, owner: &str, timeout: Option<f64>) -> Result<Lock> {
+    pub async fn acquire_lock(
+        &self,
+        path: &Path,
+        owner: &str,
+        timeout: Option<f64>,
+    ) -> Result<Lock> {
         let vault_path = self.resolve_path(path)?;
         let mut locks = self.locks.write().await;
 

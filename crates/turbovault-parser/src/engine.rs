@@ -415,7 +415,8 @@ impl<'a> ParseEngine<'a> {
                                 link_start,
                                 range.end - link_start,
                             ),
-                            target_vault: None, resolved_target: None,
+                            target_vault: None,
+                            resolved_target: None,
                             is_valid: true,
                         });
                     }

@@ -555,10 +555,7 @@ mod tests {
             parse_obsidian_uri("obsidian://open?vault=vault&file=folder%2Fnote.md"),
             Some(("vault".to_string(), "folder/note.md".to_string()))
         );
-        assert_eq!(
-            parse_obsidian_uri("invalid_uri"),
-            None
-        );
+        assert_eq!(parse_obsidian_uri("invalid_uri"), None);
     }
 
     #[test]

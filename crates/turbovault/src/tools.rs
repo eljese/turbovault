@@ -1046,24 +1046,32 @@ impl ObsidianMcpServer {
         related = ["read_full_note", "advanced_search", "query_metadata"],
         examples = ["search_term: 'deployment', max_results: 5"]
     )]
-    async fn search_vault_summaries(&self, search_term: String, max_results: Option<usize>) -> McpResult<serde_json::Value> {
+    async fn search_vault_summaries(
+        &self,
+        search_term: String,
+        max_results: Option<usize>,
+    ) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let engine = SearchEngine::new(manager).await.map_err(to_mcp_error)?;
-        
+
         let limit = max_results.unwrap_or(5).min(5);
         let results = engine.search(&search_term).await.map_err(to_mcp_error)?;
-        
+
         // Take only the top N and strip extra data to ensure lightweight response
-        let summaries: Vec<_> = results.into_iter()
+        let summaries: Vec<_> = results
+            .into_iter()
             .take(limit)
-            .map(|r| serde_json::json!({
-                "file_path": r.path,
-                "tags": r.tags,
-                "summary": r.preview
-            }))
+            .map(|r| {
+                serde_json::json!({
+                    "file_path": r.path,
+                    "tags": r.tags,
+                    "summary": r.preview
+                })
+            })
             .collect();
 
-        let result_data = serde_json::to_value(&summaries).map_err(|e| McpError::internal(e.to_string()))?;
+        let result_data =
+            serde_json::to_value(&summaries).map_err(|e| McpError::internal(e.to_string()))?;
         let count = summaries.len();
 
         let response = StandardResponse::new(vault_name, "search_vault_summaries", result_data)
@@ -1999,8 +2007,9 @@ impl ObsidianMcpServer {
         examples = ["uri: obsidian://vault/MyOtherVault/MyNote", "uri: obsidian://open?vault=VaultName&file=Note"]
     )]
     async fn resolve_cross_vault_link(&self, uri: String) -> McpResult<serde_json::Value> {
-        let (vault, file) = turbovault_tools::parse_obsidian_uri(&uri)
-            .ok_or_else(|| McpError::invalid_request(format!("Invalid or unsupported obsidian URI: {}", uri)))?;
+        let (vault, file) = turbovault_tools::parse_obsidian_uri(&uri).ok_or_else(|| {
+            McpError::invalid_request(format!("Invalid or unsupported obsidian URI: {}", uri))
+        })?;
 
         let response = StandardResponse::new(
             "none",
@@ -2615,7 +2624,10 @@ impl ObsidianMcpServer {
     ) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = LockTools::new(manager);
-        let lock = tools.acquire_lock(path, owner, timeout).await.map_err(to_mcp_error)?;
+        let lock = tools
+            .acquire_lock(path, owner, timeout)
+            .await
+            .map_err(to_mcp_error)?;
         StandardResponse::new(vault_name, "acquire_lock", lock)
             .with_next_step("write_note")
             .with_next_step("release_lock")
@@ -2633,9 +2645,16 @@ impl ObsidianMcpServer {
     async fn release_lock(&self, path: String, owner: String) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = LockTools::new(manager);
-        tools.release_lock(path, owner).await.map_err(to_mcp_error)?;
-        StandardResponse::new(vault_name, "release_lock", serde_json::json!({"status": "released"}))
-            .to_json()
+        tools
+            .release_lock(path, owner)
+            .await
+            .map_err(to_mcp_error)?;
+        StandardResponse::new(
+            vault_name,
+            "release_lock",
+            serde_json::json!({"status": "released"}),
+        )
+        .to_json()
     }
 
     /// Check if a file is locked
