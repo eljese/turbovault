@@ -88,13 +88,14 @@ impl VaultManager {
         let now = self.current_timestamp();
 
         // Check if already locked
-        if let Some(existing_lock) = locks.get(&vault_path) {
-            if !existing_lock.is_expired(now) && existing_lock.owner != owner {
-                return Err(Error::concurrency_error(format!(
-                    "File is already locked by {}",
-                    existing_lock.owner
-                )));
-            }
+        if let Some(existing_lock) = locks.get(&vault_path)
+            && !existing_lock.is_expired(now)
+            && existing_lock.owner != owner
+        {
+            return Err(Error::concurrency_error(format!(
+                "File is already locked by {}",
+                existing_lock.owner
+            )));
         }
 
         // Create and store new lock
