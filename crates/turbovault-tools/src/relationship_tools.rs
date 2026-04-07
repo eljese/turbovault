@@ -285,10 +285,10 @@ impl RelationshipTools {
     pub async fn find_vault_god_nodes(&self) -> Result<Value> {
         let graph = self.manager.link_graph();
         let read = graph.read().await;
-        
+
         let all_files = read.all_files();
         let total_files = all_files.len();
-        
+
         if total_files == 0 {
             return Ok(json!({
                 "summary": "Vault is empty",
@@ -314,26 +314,42 @@ impl RelationshipTools {
         // 2. Bridge Notes (Top by Betweenness)
         let mut by_betweenness = rankings.clone();
         by_betweenness.sort_by(|a, b| {
-            b["betweenness"].as_f64().unwrap().partial_cmp(&a["betweenness"].as_f64().unwrap()).unwrap()
+            b["betweenness"]
+                .as_f64()
+                .unwrap()
+                .partial_cmp(&a["betweenness"].as_f64().unwrap())
+                .unwrap()
         });
-        let bridges: Vec<_> = by_betweenness.iter().take(5).map(|r| {
-            json!({
-                "file": r["file"],
-                "betweenness": r["betweenness"]
+        let bridges: Vec<_> = by_betweenness
+            .iter()
+            .take(5)
+            .map(|r| {
+                json!({
+                    "file": r["file"],
+                    "betweenness": r["betweenness"]
+                })
             })
-        }).collect();
+            .collect();
 
         // 3. Authorities (Top by Eigenvector/Backlinks)
         let mut by_eigen = rankings.clone();
         by_eigen.sort_by(|a, b| {
-            b["eigenvector"].as_f64().unwrap().partial_cmp(&a["eigenvector"].as_f64().unwrap()).unwrap()
+            b["eigenvector"]
+                .as_f64()
+                .unwrap()
+                .partial_cmp(&a["eigenvector"].as_f64().unwrap())
+                .unwrap()
         });
-        let authorities: Vec<_> = by_eigen.iter().take(5).map(|r| {
-            json!({
-                "file": r["file"],
-                "eigenvector": r["eigenvector"]
+        let authorities: Vec<_> = by_eigen
+            .iter()
+            .take(5)
+            .map(|r| {
+                json!({
+                    "file": r["file"],
+                    "eigenvector": r["eigenvector"]
+                })
             })
-        }).collect();
+            .collect();
 
         // 4. Calculate Density
         let total_links = read.all_links().len();

@@ -280,12 +280,13 @@ impl VaultManager {
         expected_hash: Option<&str>,
     ) -> Result<()> {
         let vault_path = self.resolve_path(path)?;
-        
+
         // Take a per-path write lock to ensure atomicity
         let lock_arc = self.get_write_lock(&vault_path).await;
         let _lock = lock_arc.lock().await;
 
-        self.write_file_internal(&vault_path, content, expected_hash).await
+        self.write_file_internal(&vault_path, content, expected_hash)
+            .await
     }
 
     /// Internal write implementation that doesn't take the per-path lock.
@@ -344,7 +345,7 @@ impl VaultManager {
         if let (Some(audit_log), Some(snapshot_store)) = (&self.audit_log, &self.snapshot_store) {
             let rel_path = vault_path
                 .strip_prefix(&self.vault_path)
-                .unwrap_or(&vault_path)
+                .unwrap_or(vault_path)
                 .to_string_lossy()
                 .to_string();
 
@@ -474,7 +475,8 @@ impl VaultManager {
         let (new_content, _warnings) = engine.apply_blocks(&current_content, &blocks)?;
 
         // Write atomically (hash already validated above, pass None)
-        self.write_file_internal(&vault_path, &new_content, None).await?;
+        self.write_file_internal(&vault_path, &new_content, None)
+            .await?;
 
         Ok(edit_result)
     }
@@ -564,8 +566,16 @@ impl VaultManager {
 
         // Acquire locks for both paths to ensure atomicity.
         // Lock in alphabetical order to avoid circular deadlocks between concurrent moves.
-        let first_path = if from_path <= to_path { &from_path } else { &to_path };
-        let second_path = if from_path <= to_path { &to_path } else { &from_path };
+        let first_path = if from_path <= to_path {
+            &from_path
+        } else {
+            &to_path
+        };
+        let second_path = if from_path <= to_path {
+            &to_path
+        } else {
+            &from_path
+        };
 
         let lock1_arc = self.get_write_lock(first_path).await;
         let _lock1 = lock1_arc.lock().await;

@@ -6,7 +6,11 @@ use turbovault_vault::VaultManager;
 
 async fn run_on_actual_vault() {
     let config = ServerConfig {
-        vaults: vec![VaultConfig::builder("management", "/home/eljese/management").build().unwrap()],
+        vaults: vec![
+            VaultConfig::builder("management", "/home/eljese/management")
+                .build()
+                .unwrap(),
+        ],
         ..Default::default()
     };
 
@@ -15,10 +19,13 @@ async fn run_on_actual_vault() {
     manager.initialize().await.unwrap();
 
     let tools = RelationshipTools::new(manager);
-    
+
     println!("--- RUNNING TOPOLOGICAL ANALYSIS ---");
-    let report = tools.find_vault_god_nodes().await.expect("Failed to generate report");
-    
+    let report = tools
+        .find_vault_god_nodes()
+        .await
+        .expect("Failed to generate report");
+
     println!("{}", serde_json::to_string_pretty(&report).unwrap());
 }
 
