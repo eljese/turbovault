@@ -121,10 +121,12 @@
 // Core modules
 mod blocks;
 mod engine;
+pub mod models;
 pub mod parsers;
 mod standalone;
 
 // Main exports
+pub use models::TaskStatus;
 pub use parsers::Parser;
 pub use standalone::{ParseOptions, ParsedContent};
 

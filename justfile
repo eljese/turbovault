@@ -129,11 +129,12 @@ docker-logs:
 
 # Run the server
 run: release
-    ./target/release/turbovault-server
+    ./target/release/turbovault
 
-# Check server status
+# Check server status (requires HTTP transport mode on port 3000)
 status:
-    curl -s http://localhost:3000/status | jq .
+    @echo "Note: This only works with HTTP transport (--transport http --port 3000)"
+    curl -sf http://localhost:3000/status | jq . || echo "Server not responding on HTTP port 3000"
 
 # =============================================================================
 # UTILITIES
@@ -142,8 +143,8 @@ status:
 # Show project info
 info:
     @echo "TurboVault - Rust TurboVault Server"
-    @echo "Version: 1.0.0"
-    @echo "Crates: 8 (core, parser, graph, vault, batch, export, tools, server)"
+    @grep '^version' Cargo.toml | head -1 | sed 's/.*= *"/Version: /' | sed 's/"//'
+    @echo "Crates: 9 (core, audit, parser, graph, vault, batch, export, tools, binary)"
     @echo ""
     @echo "Rust version:"
     @rustc --version

@@ -9,7 +9,7 @@ use turbovault_core::{LineIndex, SourcePosition, TaskItem};
 
 /// Matches - [ ] or - [x] followed by task text
 static TASK_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\s*)- \[([ xX])\]\s+(.+)$").unwrap());
+    LazyLock::new(|| Regex::new(r"^(\s*)- \[([ xX/\-])\]\s+(.+)$").unwrap());
 
 /// Task due date: 📅 YYYY-MM-DD
 static DUE_DATE_RE: LazyLock<Regex> =

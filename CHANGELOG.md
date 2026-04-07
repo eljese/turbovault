@@ -5,6 +5,62 @@ All notable changes to TurboVault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-04-05
+
+### Changed
+
+- **BatchOperationSchema**: Removed `BatchOperationInput` wrapper and derived `JsonSchema` directly on `BatchOperation` in `turbovault-batch` to fix MCP schema.
+- **batch_execute MCP tool**: Fixed schema generation by using the correctly typed input model (`Vec<BatchOperation>`).
+
+## [1.3.0] - 2026-03-31
+
+### Added
+
+- **`TaskStatus` enum**: Parser now distinguishes `Pending`, `Done`, `InProgress`, and `Cancelled` task states, supporting Obsidian's `[/]` and `[-]` checkbox markers.
+- **Path-suffix index**: O(1) resolution of folder-qualified wikilinks like `[[Folder/Note]]`, replacing O(N) full-graph scan.
+- **SearchEngine caching**: Tantivy index is now built once per vault and cached, with automatic invalidation on writes. Eliminates full re-index per query.
+- **CSV injection protection**: All CSV export functions use RFC 4180 quoting with formula-prefix escaping (`=`, `+`, `-`, `@`).
+- **CI security audit**: Added `cargo audit` (rustsec) and MSRV verification (Rust 1.90.0) jobs to CI pipeline.
+- **67 new tests**: Comprehensive coverage for graph algorithms, edit engine strategies, batch execution, VaultCache persistence, TaskStatus, csv_escape, and manager file lifecycle operations. Total: 716 tests.
+
+### Fixed
+
+- **Graph `connected_components` used SCC instead of weakly connected**: Replaced Tarjan's SCC with UnionFind-based weakly connected components. Previously, `A→B→C` produced 3 singleton components; now correctly produces 1.
+- **`HeadingRef` and `BlockRef` links dropped from graph**: Links like `[[Note#Heading]]` and `[[Note#^blockid]]` are now included in graph edge construction, fixing missing backlinks and broken link detection.
+- **Same-document anchors flagged as broken**: `[[#Heading]]` links are now correctly skipped instead of being added to unresolved links.
+- **`related_notes` used DFS instead of BFS**: Changed from `Vec::pop()` to `VecDeque::pop_front()` for correct breadth-first traversal.
+- **Health score saturation cascade**: Penalties are now computed independently and summed, preventing early floor at 0.
+- **Isolated cluster detection**: Uses largest-component exclusion instead of hardcoded `len < 5` threshold.
+- **Batch `DeleteNote`/`MoveNote` bypassed VaultManager**: Now routed through `VaultManager::delete_file`/`move_file` for proper audit trails, graph updates, and cache invalidation.
+- **`fuzzy_find_whitespace` always returned `None`**: Implemented line-based whitespace-normalized matching (Strategy 2 in the edit cascade).
+- **Levenshtein DoS vector**: Added 10M character-comparison budget cap to prevent CPU exhaustion.
+- **Temp file leak in `batch_execute`**: Removed `.keep()` call and unused `temp_dir` field from `BatchExecutor`.
+- **Temp file orphaned on rename failure**: `write_file` now cleans up the temp file if atomic rename fails.
+- **Graph update errors silently swallowed**: All `let _ = graph.*` calls replaced with `log::warn!`.
+- **Tag regex rejected digit-first tags**: `#2024` and `#1password` now correctly parsed by both engine and deprecated parsers.
+- **Deprecated tag parser matched URL fragments**: Added word-boundary guard to prevent `https://example.com#section` from producing a tag.
+- **Deprecated frontmatter regex failed without trailing newline**: Now accepts `(?:\n|$)` at closing `---`.
+- **CRLF offset tracking**: Callout parser accounts for `\r\n` line endings.
+- **Tantivy field lookups used `.unwrap()`**: Field handles stored as struct fields, eliminating runtime panics.
+- **`partial_cmp().unwrap()` on f64 sorts**: Replaced with panic-free `total_cmp()`.
+- **Thundering herd on first vault access**: Double-checked locking prevents redundant initialization.
+
+### Changed
+
+- **Weakly connected components algorithm**: `connected_components()` now uses `petgraph::unionfind::UnionFind` for O(V + E·α(V)) performance.
+- **`max_hops` capped at 5**: `get_related_notes` tool enforces a maximum traversal depth.
+- **`max_vaults` limit**: `MultiVaultManager::add_vault` enforces a 50-vault cap.
+- **Docker image pinned**: Builder uses `rust:1.90-bookworm`, removed semantically meaningless `HEALTHCHECK`.
+- **docker-compose**: Removed deprecated `version: '3.8'` key.
+- **CI**: `--all-features` added to clippy and test steps; `actions/checkout@v4` pinned.
+- **Unused dependencies removed**: `nom`, `lazy_static`, `env_logger`, `insta` removed from workspace.
+- **Export crate**: Removed phantom `turbovault-vault` dependency.
+
+### Removed
+
+- **`BatchExecutor.temp_dir` field**: Was unused dead code.
+- **Hardcoded version in justfile**: Now reads dynamically from `Cargo.toml`.
+
 ## [1.2.11] - 2026-03-26
 
 ### Added
@@ -234,6 +290,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Atomic file operations with rollback support
 - Configuration profiles (development, production, readonly, high-performance)
 
+[1.3.0]: https://github.com/epistates/turbovault/compare/v1.2.11...v1.3.0
 [1.2.11]: https://github.com/epistates/turbovault/compare/v1.2.10...v1.2.11
 [1.2.10]: https://github.com/epistates/turbovault/compare/v1.2.9...v1.2.10
 [1.2.9]: https://github.com/epistates/turbovault/compare/v1.2.8...v1.2.9

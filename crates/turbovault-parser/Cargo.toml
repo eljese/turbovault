@@ -25,7 +25,6 @@ log = { workspace = true }
 pulldown-cmark = { workspace = true }      # CommonMark parser with OFM extensions
 
 [dev-dependencies]
-insta = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 
 [package.metadata.docs.rs]

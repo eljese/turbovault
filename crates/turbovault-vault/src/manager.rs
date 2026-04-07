@@ -218,7 +218,9 @@ impl VaultManager {
                             },
                         );
 
-                        let _ = graph.add_file(&vault_file);
+                        if let Err(e) = graph.add_file(&vault_file) {
+                            log::warn!("Graph add_file failed for {}: {}", file_path.display(), e);
+                        }
                         parsed_files.push(vault_file);
                     }
                     Err(e) => {
@@ -232,7 +234,9 @@ impl VaultManager {
 
         // Pass 2: resolve links (all files now in the index)
         for vault_file in &parsed_files {
-            let _ = graph.update_links(vault_file);
+            if let Err(e) = graph.update_links(vault_file) {
+                log::warn!("Graph update_links failed: {}", e);
+            }
         }
 
         log::info!(
@@ -336,10 +340,11 @@ impl VaultManager {
             .await
             .map_err(Error::io)?;
 
-        // Atomic rename
-        tokio::fs::rename(&temp_path, &vault_path)
-            .await
-            .map_err(Error::io)?;
+        // Atomic rename (clean up temp file on failure)
+        if let Err(e) = tokio::fs::rename(&temp_path, &vault_path).await {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            return Err(Error::io(e));
+        }
 
         // Record audit trail (fire-and-forget — never blocks writes)
         if let (Some(audit_log), Some(snapshot_store)) = (&self.audit_log, &self.snapshot_store) {
@@ -396,8 +401,16 @@ impl VaultManager {
 
                 // Update graph
                 let mut graph = self.link_graph.write().await;
-                let _ = graph.add_file(&vault_file);
-                let _ = graph.update_links(&vault_file);
+                if let Err(e) = graph.add_file(&vault_file) {
+                    log::warn!("Graph add_file failed for {}: {}", vault_path.display(), e);
+                }
+                if let Err(e) = graph.update_links(&vault_file) {
+                    log::warn!(
+                        "Graph update_links failed for {}: {}",
+                        vault_path.display(),
+                        e
+                    );
+                }
                 log::debug!("Graph updated for {}", vault_path.display());
             }
             Err(e) => {
@@ -632,7 +645,13 @@ impl VaultManager {
         // Update graph: remove old, add new
         {
             let mut graph = self.link_graph.write().await;
-            let _ = graph.remove_file(&from_path);
+            if let Err(e) = graph.remove_file(&from_path) {
+                log::warn!(
+                    "Graph remove_file failed for {}: {}",
+                    from_path.display(),
+                    e
+                );
+            }
         }
 
         // Invalidate cache for old path
@@ -645,8 +664,12 @@ impl VaultManager {
         match self.parser.parse_file(&to_path, &content) {
             Ok(vault_file) => {
                 let mut graph = self.link_graph.write().await;
-                let _ = graph.add_file(&vault_file);
-                let _ = graph.update_links(&vault_file);
+                if let Err(e) = graph.add_file(&vault_file) {
+                    log::warn!("Graph add_file failed for {}: {}", to_path.display(), e);
+                }
+                if let Err(e) = graph.update_links(&vault_file) {
+                    log::warn!("Graph update_links failed for {}: {}", to_path.display(), e);
+                }
             }
             Err(e) => {
                 log::warn!("Failed to parse {} after move: {}", to_path.display(), e);
@@ -1192,5 +1215,190 @@ mod tests {
         // Also test with deeper traversal
         let result2 = manager.resolve_path(Path::new("../../../etc/passwd"));
         assert!(result2.is_err(), "Path traversal should be prevented");
+    }
+
+    // -------------------------------------------------------------------------
+    // New comprehensive tests
+    // -------------------------------------------------------------------------
+
+    /// Writing a file then deleting it should leave the path absent on disk,
+    /// and a subsequent `read_file` must return an error.
+    #[tokio::test]
+    async fn test_delete_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config(temp_dir.path());
+        let manager = VaultManager::new(config).unwrap();
+
+        let rel = Path::new("to_delete.md");
+        manager.write_file(rel, "# Delete me", None).await.unwrap();
+
+        // Verify the file exists before deletion.
+        assert!(temp_dir.path().join(rel).exists());
+
+        manager.delete_file(rel, None).await.unwrap();
+
+        // File must no longer exist on disk.
+        assert!(
+            !temp_dir.path().join(rel).exists(),
+            "File should be gone after delete_file"
+        );
+
+        // read_file must return an error for the deleted path.
+        let result = manager.read_file(rel).await;
+        assert!(result.is_err(), "read_file on deleted path should error");
+    }
+
+    /// Moving a file should put its content at the new path and remove the old path.
+    #[tokio::test]
+    async fn test_move_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config(temp_dir.path());
+        let manager = VaultManager::new(config).unwrap();
+
+        let src = Path::new("source_note.md");
+        let dst = Path::new("dest_note.md");
+        let content = "# Moved Note\nsome content";
+
+        manager.write_file(src, content, None).await.unwrap();
+
+        manager.move_file(src, dst, None).await.unwrap();
+
+        // Old path must no longer exist.
+        assert!(
+            !temp_dir.path().join(src).exists(),
+            "Source file should be gone after move"
+        );
+
+        // New path must exist with the original content.
+        let read_back = manager.read_file(dst).await.unwrap();
+        assert_eq!(
+            read_back, content,
+            "Destination must have the original content"
+        );
+    }
+
+    /// Moving a file to a subdirectory that doesn't exist yet should create
+    /// the intermediate directories automatically.
+    #[tokio::test]
+    async fn test_move_file_cross_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config(temp_dir.path());
+        let manager = VaultManager::new(config).unwrap();
+
+        let src = Path::new("flat_note.md");
+        let dst = Path::new("deep/nested/subdir/note.md");
+        let content = "# Cross-dir Move";
+
+        manager.write_file(src, content, None).await.unwrap();
+
+        // The destination directory does not exist yet.
+        assert!(!temp_dir.path().join("deep").exists());
+
+        manager.move_file(src, dst, None).await.unwrap();
+
+        // Source gone, destination present.
+        assert!(!temp_dir.path().join(src).exists());
+        assert!(temp_dir.path().join(dst).exists());
+
+        let read_back = manager.read_file(dst).await.unwrap();
+        assert_eq!(read_back, content);
+    }
+
+    /// After a successful `write_file` no `.tmp.*` files should remain
+    /// anywhere under the vault directory.
+    #[tokio::test]
+    async fn test_temp_file_cleanup_on_write() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config(temp_dir.path());
+        let manager = VaultManager::new(config).unwrap();
+
+        // Write into a nested directory to exercise the parent-creation path
+        // and ensure temp files are cleaned up in the right place.
+        let rel = Path::new("sub/cleanup_test.md");
+        manager.write_file(rel, "content", None).await.unwrap();
+
+        // Walk the entire vault tree and assert no `.tmp.*` files remain.
+        let mut stack = vec![temp_dir.path().to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    assert!(
+                        !ext.starts_with("tmp"),
+                        "Leftover temp file found: {:?}",
+                        path
+                    );
+                }
+            }
+        }
+    }
+
+    /// After writing a note that contains a wikilink the link graph must
+    /// record that forward link from the written file.
+    #[tokio::test]
+    async fn test_graph_updated_after_write() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config(temp_dir.path());
+        let manager = VaultManager::new(config).unwrap();
+
+        // Write the target file so the parser can resolve the link.
+        let target = Path::new("target.md");
+        manager.write_file(target, "# Target", None).await.unwrap();
+
+        // Write a source file that links to target.
+        let source = Path::new("source.md");
+        manager
+            .write_file(source, "# Source\n[[target]]", None)
+            .await
+            .unwrap();
+
+        // Check the link graph via forward_links on the absolute source path.
+        let source_abs = temp_dir.path().join(source);
+        let forward = manager.get_forward_links(&source_abs).await.unwrap();
+
+        // At least one forward link should resolve to target.
+        assert!(
+            !forward.is_empty(),
+            "Link graph should record the [[target]] forward link after write"
+        );
+    }
+
+    /// After deleting file A (which links to B) the backlinks for B must no
+    /// longer include A.
+    #[tokio::test]
+    async fn test_graph_updated_after_delete() {
+        let temp_dir = TempDir::new().unwrap();
+        let config = create_test_config(temp_dir.path());
+        let manager = VaultManager::new(config).unwrap();
+
+        // Create both files and initialize so the graph is populated.
+        std::fs::write(temp_dir.path().join("a.md"), "# A\n[[b]]").unwrap();
+        std::fs::write(temp_dir.path().join("b.md"), "# B").unwrap();
+        manager.initialize().await.unwrap();
+
+        // Sanity: A should appear as a backlink to B before deletion.
+        let b_abs = temp_dir.path().join("b.md");
+        let backlinks_before = manager.get_backlinks(&b_abs).await.unwrap();
+        assert!(
+            !backlinks_before.is_empty(),
+            "Before deletion A should be a backlink to B"
+        );
+
+        // Delete A.
+        manager.delete_file(Path::new("a.md"), None).await.unwrap();
+
+        // After deletion A must no longer appear in B's backlinks.
+        let backlinks_after = manager.get_backlinks(&b_abs).await.unwrap();
+        let a_abs = temp_dir.path().join("a.md");
+        let a_still_linked = backlinks_after.iter().any(|p| p == &a_abs);
+        assert!(
+            !a_still_linked,
+            "After deleting A, it must not appear in B's backlinks; found: {:?}",
+            backlinks_after
+        );
     }
 }

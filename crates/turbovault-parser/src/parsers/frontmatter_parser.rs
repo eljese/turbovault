@@ -8,7 +8,7 @@ use turbovault_core::Result;
 
 /// Matches YAML frontmatter: --- ... ---
 static FRONTMATTER_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^---\s*\n([\s\S]*?)\n---\s*\n").unwrap());
+    LazyLock::new(|| Regex::new(r"^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)").unwrap());
 
 /// Extract YAML frontmatter from content
 ///

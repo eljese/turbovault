@@ -1,8 +1,9 @@
 //! Link graph using petgraph for vault relationship analysis
 
-use petgraph::algo::kosaraju_scc;
 use petgraph::prelude::*;
-use std::collections::{HashMap, HashSet};
+use petgraph::unionfind::UnionFind;
+use petgraph::visit::{EdgeRef, NodeIndexable};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use turbovault_core::prelude::*;
 
@@ -37,6 +38,10 @@ pub struct LinkGraph {
     /// Links that could not be resolved to a target file, grouped by source path.
     /// Used by HealthAnalyzer for broken link detection.
     unresolved_links: HashMap<PathBuf, Vec<Link>>,
+
+    /// Index from reversed lowercase path suffix to node indices for O(1) path-suffix resolution.
+    /// Used by `resolve_link` to avoid O(N) scans of `path_index`.
+    path_suffix_index: HashMap<Vec<String>, Vec<NodeIndex>>,
 }
 
 impl LinkGraph {
@@ -50,6 +55,7 @@ impl LinkGraph {
             cross_vault_index: HashMap::new(),
             cross_vault_source_index: HashMap::new(),
             unresolved_links: HashMap::new(),
+            path_suffix_index: HashMap::new(),
         }
     }
 
@@ -75,6 +81,20 @@ impl LinkGraph {
                     .entry(stem.to_lowercase())
                     .or_default()
                     .push(idx);
+            }
+
+            // Build path suffix entries for folder-qualified lookups like [[Folder/Note]]
+            let components: Vec<String> = path
+                .iter()
+                .filter_map(|c| c.to_str())
+                .map(|s| {
+                    let lower = s.to_lowercase();
+                    lower.strip_suffix(".md").unwrap_or(&lower).to_string()
+                })
+                .collect();
+            for i in (0..components.len()).rev() {
+                let suffix = components[i..].to_vec();
+                self.path_suffix_index.entry(suffix).or_default().push(idx);
             }
 
             idx
@@ -123,6 +143,13 @@ impl LinkGraph {
             }
             self.alias_index.retain(|_, indices| !indices.is_empty());
 
+            // Remove path_suffix_index entries pointing to this node
+            for indices in self.path_suffix_index.values_mut() {
+                indices.retain(|&i| i != idx);
+            }
+            self.path_suffix_index
+                .retain(|_, indices| !indices.is_empty());
+
             // Before removing, identify the node that will be swapped into `idx`.
             // petgraph moves the last node (highest index) into the removed slot.
             let last_idx = NodeIndex::new(self.graph.node_count() - 1);
@@ -161,6 +188,15 @@ impl LinkGraph {
                     }
                 }
 
+                // Update path_suffix_index: replace last_idx with idx
+                for indices in self.path_suffix_index.values_mut() {
+                    for node_idx in indices.iter_mut() {
+                        if *node_idx == last_idx {
+                            *node_idx = idx;
+                        }
+                    }
+                }
+
                 // Update unresolved_links key if the swapped node had entries
                 // (key is by path, not by index, so no change needed — paths don't move)
             }
@@ -179,6 +215,25 @@ impl LinkGraph {
         } else {
             let idx = self.graph.add_node(source_path.clone());
             self.path_index.insert(source_path.clone(), idx);
+            // Also populate file_index and path_suffix_index for stem-based resolution
+            if let Some(stem) = source_path.file_stem().and_then(|s| s.to_str()) {
+                self.file_index
+                    .entry(stem.to_lowercase())
+                    .or_default()
+                    .push(idx);
+            }
+            let components: Vec<String> = source_path
+                .iter()
+                .filter_map(|c| c.to_str())
+                .map(|s| {
+                    let lower = s.to_lowercase();
+                    lower.strip_suffix(".md").unwrap_or(&lower).to_string()
+                })
+                .collect();
+            for i in (0..components.len()).rev() {
+                let suffix = components[i..].to_vec();
+                self.path_suffix_index.entry(suffix).or_default().push(idx);
+            }
             idx
         };
 
@@ -196,9 +251,12 @@ impl LinkGraph {
         self.cross_vault_index.retain(|_, v| !v.is_empty());
         self.cross_vault_source_index.remove(source_path);
 
-        // Add edges for each internal link (wikilinks and embeds)
+        // Add edges for each internal link (wikilinks, embeds, heading refs, block refs)
         for link in &file.links {
-            if matches!(link.type_, LinkType::WikiLink | LinkType::Embed) {
+            if matches!(
+                link.type_,
+                LinkType::WikiLink | LinkType::Embed | LinkType::HeadingRef | LinkType::BlockRef
+            ) {
                 if let Some(target_vault) = &link.target_vault {
                     // Cross-vault link: index it separately
                     self.cross_vault_index
@@ -210,17 +268,24 @@ impl LinkGraph {
                         .entry(source_path.clone())
                         .or_default()
                         .push(link.clone());
-                } else if let Some(target_idx) = self.resolve_link(&link.target) {
-                    // Internal link
-                    self.graph.add_edge(source_idx, target_idx, link.clone());
                 } else {
-                    // Track unresolved links for broken link detection
-                    let mut broken = link.clone();
-                    broken.is_valid = false;
-                    self.unresolved_links
-                        .entry(source_path.clone())
-                        .or_default()
-                        .push(broken);
+                    // Skip same-document anchors like [[#Heading]]
+                    let clean_target = link.target.split('#').next().unwrap_or("").trim();
+                    if clean_target.is_empty() {
+                        continue;
+                    }
+
+                    if let Some(target_idx) = self.resolve_link(&link.target) {
+                        self.graph.add_edge(source_idx, target_idx, link.clone());
+                    } else {
+                        // Track unresolved links for broken link detection
+                        let mut broken = link.clone();
+                        broken.is_valid = false;
+                        self.unresolved_links
+                            .entry(source_path.clone())
+                            .or_default()
+                            .push(broken);
+                    }
                 }
             }
         }
@@ -228,61 +293,78 @@ impl LinkGraph {
         Ok(())
     }
 
-    /// Resolve a wikilink target to a file path and node index.
-    /// Resolution is case-insensitive to match Obsidian's behaviour.
+    /// Resolve a link target to a node index using various strategies
     fn resolve_link(&self, target: &str) -> Option<NodeIndex> {
-        // Remove block/heading references
-        let clean_target = target.split('#').next()?.trim();
-        let clean_lower = clean_target.to_lowercase();
+        // Strip anchors/aliases if present
+        let clean_target = target.split('|').next().unwrap_or(target);
+        let clean_target = clean_target.split('#').next().unwrap_or(clean_target).trim();
 
-        // Try direct stem match (case-insensitive, first-found wins)
-        if let Some(indices) = self.file_index.get(&clean_lower)
-            && let Some(&idx) = indices.first()
-        {
-            return Some(idx);
-        }
-
-        // Try alias match (case-insensitive, first-found wins)
-        if let Some(indices) = self.alias_index.get(&clean_lower)
-            && let Some(&idx) = indices.first()
-        {
-            return Some(idx);
-        }
-
-        // Try path-like match (folder/Note) with case-insensitive comparison.
-        // Obsidian wikilinks omit the .md extension, so we strip it from path
-        // components before comparing.
-        let target_parts: Vec<String> = clean_target
-            .split('/')
-            .filter(|p| !p.is_empty())
-            .map(|p| p.to_lowercase())
-            .collect();
-        if target_parts.is_empty() {
+        if clean_target.is_empty() {
             return None;
         }
 
-        // Find file path that matches the tail of the target path
-        for (path, &idx) in self.path_index.iter() {
-            let mut path_parts: Vec<String> = path
+        let target_lower = clean_target.to_lowercase();
+
+        // Strategy 1: Exact path match (fastest)
+        let target_path = PathBuf::from(clean_target);
+        if let Some(&idx) = self.path_index.get(&target_path) {
+            return Some(idx);
+        }
+        // Try with .md extension if missing
+        if !clean_target.ends_with(".md") {
+            let mut path_with_ext = target_path.clone();
+            path_with_ext.set_extension("md");
+            if let Some(&idx) = self.path_index.get(&path_with_ext) {
+                return Some(idx);
+            }
+        }
+
+        // Strategy 2: File name (stem) match (O(1) via file_index)
+        if let Some(indices) = self.file_index.get(&target_lower) {
+            if !indices.is_empty() {
+                return Some(indices[0]);
+            }
+        }
+
+        // Strategy 3: Alias match (O(1) via alias_index)
+        if let Some(indices) = self.alias_index.get(&target_lower) {
+            if !indices.is_empty() {
+                return Some(indices[0]);
+            }
+        }
+
+        // Strategy 4: Path suffix match (O(1) via path_suffix_index)
+        // Handles targets like [[Folder/Note]] or [[Projects/2024/Goal]]
+        let suffix_components: Vec<String> = clean_target
+            .split('/')
+            .map(|s| {
+                let lower = s.to_lowercase();
+                lower.strip_suffix(".md").unwrap_or(&lower).to_string()
+            })
+            .collect();
+
+        if let Some(indices) = self.path_suffix_index.get(&suffix_components) {
+            // Find candidates that end with the requested suffix
+            let candidates: Vec<_> = indices
                 .iter()
-                .filter_map(|p| p.to_str())
-                .map(|p| p.to_lowercase())
+                .filter(|&&idx| {
+                    let path = &self.graph[idx];
+                    let path_lower = path.to_string_lossy().to_lowercase();
+                    let path_clean = path_lower.strip_suffix(".md").unwrap_or(&path_lower);
+                    path_clean.ends_with(&target_lower)
+                })
                 .collect();
 
-            // Strip .md extension from the last component to match Obsidian's
-            // extension-free wikilink convention (e.g. [[folder/Note]] resolves
-            // to folder/Note.md)
-            if let Some(last) = path_parts.last_mut()
-                && let Some(stripped) = last.strip_suffix(".md")
-            {
-                *last = stripped.to_string();
+            // Single match — unambiguous
+            if candidates.len() == 1 {
+                return Some(*candidates[0]);
             }
-
-            if path_parts.len() >= target_parts.len() {
-                let start = path_parts.len() - target_parts.len();
-                if path_parts[start..] == target_parts[..] {
-                    return Some(idx);
-                }
+            // Multiple matches — pick the shortest path (most specific)
+            if !candidates.is_empty() {
+                return candidates
+                    .into_iter()
+                    .min_by_key(|&idx| self.graph[*idx].components().count())
+                    .copied();
             }
         }
 
@@ -354,12 +436,13 @@ impl LinkGraph {
     pub fn related_notes(&self, path: &PathBuf, max_hops: usize) -> Result<Vec<PathBuf>> {
         if let Some(&start_idx) = self.path_index.get(path) {
             let mut visited = HashSet::new();
-            let mut queue = vec![(start_idx, 0)];
+            let mut queue = VecDeque::new();
+            queue.push_back((start_idx, 0));
             let mut related = Vec::new();
 
             visited.insert(start_idx);
 
-            while let Some((idx, hops)) = queue.pop() {
+            while let Some((idx, hops)) = queue.pop_front() {
                 if hops > 0 {
                     related.push(self.graph[idx].clone());
                 }
@@ -368,7 +451,7 @@ impl LinkGraph {
                     // Add all neighbors
                     for neighbor_idx in self.graph.neighbors(idx) {
                         if visited.insert(neighbor_idx) {
-                            queue.push((neighbor_idx, hops + 1));
+                            queue.push_back((neighbor_idx, hops + 1));
                         }
                     }
 
@@ -376,7 +459,7 @@ impl LinkGraph {
                     for neighbor_idx in self.graph.edges_directed(idx, Incoming).map(|e| e.source())
                     {
                         if visited.insert(neighbor_idx) {
-                            queue.push((neighbor_idx, hops + 1));
+                            queue.push_back((neighbor_idx, hops + 1));
                         }
                     }
                 }
@@ -390,7 +473,7 @@ impl LinkGraph {
 
     /// Find strongly connected components (cycles in the graph)
     pub fn cycles(&self) -> Vec<Vec<PathBuf>> {
-        let sccs = kosaraju_scc(&self.graph);
+        let sccs = petgraph::algo::kosaraju_scc(&self.graph);
         sccs.into_iter()
             .filter(|scc| scc.len() > 1) // Only return actual cycles (size > 1)
             .map(|scc| scc.iter().map(|&idx| self.graph[idx].clone()).collect())
@@ -504,15 +587,28 @@ impl LinkGraph {
             .unwrap_or_default()
     }
 
-    /// Find connected components in the graph (using undirected view)
+    /// Find weakly connected components in the graph (treating edges as undirected).
+    /// Uses UnionFind for O(V + E * alpha(V)) performance.
     pub fn connected_components(&self) -> Result<Vec<Vec<PathBuf>>> {
-        use petgraph::algo::tarjan_scc;
+        let node_bound = self.graph.node_bound();
+        if node_bound == 0 {
+            return Ok(Vec::new());
+        }
 
-        // Use Tarjan's algorithm for strongly connected components
-        let components = tarjan_scc(&self.graph);
+        let mut uf = UnionFind::new(node_bound);
+        for edge in self.graph.edge_references() {
+            uf.union(edge.source().index(), edge.target().index());
+        }
 
-        let result: Vec<Vec<PathBuf>> = components
-            .into_iter()
+        // Group node indices by their representative
+        let mut groups: HashMap<usize, Vec<NodeIndex>> = HashMap::new();
+        for idx in self.graph.node_indices() {
+            let rep = uf.find(idx.index());
+            groups.entry(rep).or_default().push(idx);
+        }
+
+        let result: Vec<Vec<PathBuf>> = groups
+            .into_values()
             .map(|component| {
                 component
                     .iter()
@@ -809,6 +905,354 @@ mod tests {
         graph.update_links(&linker).unwrap();
 
         assert_eq!(graph.edge_count(), 1);
+        assert!(graph.all_unresolved_links().is_empty());
+    }
+
+    // --- connected_components tests ---
+
+    #[test]
+    fn test_connected_components_weakly_connected() {
+        // A→B→C is a directed chain. Weakly connected: all 3 belong to one component.
+        let mut graph = LinkGraph::new();
+        let a = create_test_file("a.md", vec![]);
+        let b = create_test_file("b.md", vec!["a"]);
+        let c = create_test_file("c.md", vec!["b"]);
+
+        graph.add_file(&a).unwrap();
+        graph.add_file(&b).unwrap();
+        graph.add_file(&c).unwrap();
+        graph.update_links(&b).unwrap();
+        graph.update_links(&c).unwrap();
+
+        let components = graph.connected_components().unwrap();
+        assert_eq!(
+            components.len(),
+            1,
+            "chain A→B→C should form a single weakly-connected component"
+        );
+        assert_eq!(components[0].len(), 3);
+    }
+
+    #[test]
+    fn test_connected_components_two_islands() {
+        // A→B and C→D with no link between the pairs → 2 components.
+        let mut graph = LinkGraph::new();
+        let a = create_test_file("island_a1.md", vec![]);
+        let b = create_test_file("island_a2.md", vec!["island_a1"]);
+        let c = create_test_file("island_b1.md", vec![]);
+        let d = create_test_file("island_b2.md", vec!["island_b1"]);
+
+        graph.add_file(&a).unwrap();
+        graph.add_file(&b).unwrap();
+        graph.add_file(&c).unwrap();
+        graph.add_file(&d).unwrap();
+        graph.update_links(&b).unwrap();
+        graph.update_links(&d).unwrap();
+
+        let components = graph.connected_components().unwrap();
+        assert_eq!(
+            components.len(),
+            2,
+            "two disconnected pairs should yield 2 components"
+        );
+        let sizes: Vec<usize> = {
+            let mut s: Vec<usize> = components.iter().map(|c| c.len()).collect();
+            s.sort_unstable();
+            s
+        };
+        assert_eq!(sizes, vec![2, 2]);
+    }
+
+    #[test]
+    fn test_connected_components_empty_graph() {
+        let graph = LinkGraph::new();
+        let components = graph.connected_components().unwrap();
+        assert!(components.is_empty(), "empty graph should return empty vec");
+    }
+
+    // --- path_suffix_index tests ---
+
+    #[test]
+    fn test_path_suffix_index_basic() {
+        // Two files share the stem "note" but live in different folders.
+        // [[note]] resolves via file_index (stem) — hits one of them.
+        // [[2024/note]] resolves via path_suffix_index to projects/2024/note.md only.
+        let mut graph = LinkGraph::new();
+        let deep = create_test_file("projects/2024/note.md", vec![]);
+        let daily = create_test_file("daily/note.md", vec![]);
+
+        graph.add_file(&deep).unwrap();
+        graph.add_file(&daily).unwrap();
+
+        // [[note]] stems match both → file_index has 2 entries; first-found wins.
+        // Either way the link must resolve (edge count = 1).
+        let linker_stem = create_test_file("linker_stem.md", vec!["note"]);
+        graph.add_file(&linker_stem).unwrap();
+        graph.update_links(&linker_stem).unwrap();
+        assert_eq!(
+            graph.edge_count(),
+            1,
+            "[[note]] should resolve via file_index to one of the two files"
+        );
+
+        // Remove that edge so we can test suffix resolution cleanly.
+        let linker_stem_path = PathBuf::from("linker_stem.md");
+        graph.remove_file(&linker_stem_path).unwrap();
+
+        // [[2024/note]] — path suffix ["2024", "note"] should match only projects/2024/note.md.
+        let linker_suffix = create_test_file("linker_suffix.md", vec!["2024/note"]);
+        graph.add_file(&linker_suffix).unwrap();
+        graph.update_links(&linker_suffix).unwrap();
+
+        assert!(
+            graph.all_unresolved_links().is_empty(),
+            "[[2024/note]] should resolve successfully"
+        );
+        let forward = graph
+            .forward_links(&PathBuf::from("linker_suffix.md"))
+            .unwrap();
+        assert_eq!(forward.len(), 1);
+        assert_eq!(forward[0].0, PathBuf::from("projects/2024/note.md"));
+    }
+
+    #[test]
+    fn test_path_suffix_index_disambiguation() {
+        // a/shared.md and b/shared.md share stem "shared".
+        // [[shared]] matches both via file_index → first-found wins.
+        // [[a/shared]] matches only a/shared.md via path_suffix_index.
+        let mut graph = LinkGraph::new();
+        let a = create_test_file("a/shared.md", vec![]);
+        let b = create_test_file("b/shared.md", vec![]);
+
+        graph.add_file(&a).unwrap();
+        graph.add_file(&b).unwrap();
+
+        // [[shared]] → file_index, multiple candidates, first wins → exactly 1 edge.
+        let linker1 = create_test_file("linker1.md", vec!["shared"]);
+        graph.add_file(&linker1).unwrap();
+        graph.update_links(&linker1).unwrap();
+        assert_eq!(
+            graph.edge_count(),
+            1,
+            "[[shared]] should resolve to first-added candidate"
+        );
+
+        // Remove linker1 to test suffix resolution in isolation.
+        graph.remove_file(&PathBuf::from("linker1.md")).unwrap();
+
+        // [[a/shared]] → path_suffix_index, should match only a/shared.md.
+        let linker2 = create_test_file("linker2.md", vec!["a/shared"]);
+        graph.add_file(&linker2).unwrap();
+        graph.update_links(&linker2).unwrap();
+
+        assert!(
+            graph.all_unresolved_links().is_empty(),
+            "[[a/shared]] should resolve"
+        );
+        let forward = graph.forward_links(&PathBuf::from("linker2.md")).unwrap();
+        assert_eq!(forward.len(), 1);
+        assert_eq!(forward[0].0, PathBuf::from("a/shared.md"));
+    }
+
+    // --- HeadingRef / BlockRef edge creation tests ---
+
+    fn create_link_with_type(path: &str, target: &str, link_type: LinkType) -> Link {
+        Link {
+            type_: link_type,
+            source_file: PathBuf::from(path),
+            target: target.to_string(),
+            target_vault: None,
+            display_text: None,
+            position: SourcePosition::new(0, 0, 0, 10),
+            resolved_target: None,
+            is_valid: true,
+        }
+    }
+
+    fn create_test_file_with_typed_link(
+        path: &str,
+        target: &str,
+        link_type: LinkType,
+    ) -> VaultFile {
+        let link = create_link_with_type(path, target, link_type);
+        let mut file = VaultFile::new(
+            PathBuf::from(path),
+            String::new(),
+            FileMetadata {
+                path: PathBuf::from(path),
+                size: 0,
+                created_at: 0.0,
+                modified_at: 0.0,
+                checksum: String::new(),
+                is_attachment: false,
+            },
+        );
+        file.links = vec![link];
+        file
+    }
+
+    #[test]
+    fn test_heading_ref_creates_edge() {
+        // [[B#heading]] — HeadingRef — should create an edge from A to B.
+        let mut graph = LinkGraph::new();
+        let b = create_test_file("B.md", vec![]);
+        graph.add_file(&b).unwrap();
+
+        let a = create_test_file_with_typed_link("A.md", "B#heading", LinkType::HeadingRef);
+        graph.add_file(&a).unwrap();
+        graph.update_links(&a).unwrap();
+
+        assert_eq!(
+            graph.edge_count(),
+            1,
+            "HeadingRef link should create an edge"
+        );
+        assert!(graph.all_unresolved_links().is_empty());
+
+        let forward = graph.forward_links(&PathBuf::from("A.md")).unwrap();
+        assert_eq!(forward.len(), 1);
+        assert_eq!(forward[0].0, PathBuf::from("B.md"));
+    }
+
+    #[test]
+    fn test_block_ref_creates_edge() {
+        // [[B#^blockid]] — BlockRef — should create an edge from A to B.
+        let mut graph = LinkGraph::new();
+        let b = create_test_file("B.md", vec![]);
+        graph.add_file(&b).unwrap();
+
+        let a = create_test_file_with_typed_link("A.md", "B#^blockid", LinkType::BlockRef);
+        graph.add_file(&a).unwrap();
+        graph.update_links(&a).unwrap();
+
+        assert_eq!(graph.edge_count(), 1, "BlockRef link should create an edge");
+        assert!(graph.all_unresolved_links().is_empty());
+
+        let forward = graph.forward_links(&PathBuf::from("A.md")).unwrap();
+        assert_eq!(forward.len(), 1);
+        assert_eq!(forward[0].0, PathBuf::from("B.md"));
+    }
+
+    #[test]
+    fn test_same_document_anchor_skipped() {
+        // [[#heading]] — target is "#heading", clean_target is "" after split('#').
+        // update_links must skip it: no self-loop and not in unresolved_links.
+        let mut graph = LinkGraph::new();
+        let a = create_test_file_with_typed_link("A.md", "#heading", LinkType::HeadingRef);
+        graph.add_file(&a).unwrap();
+        graph.update_links(&a).unwrap();
+
+        assert_eq!(
+            graph.edge_count(),
+            0,
+            "same-document anchor must not create any edge"
+        );
+        assert!(
+            graph.all_unresolved_links().is_empty(),
+            "same-document anchor must not appear in unresolved_links"
+        );
+    }
+
+    // --- BFS order test ---
+
+    #[test]
+    fn test_related_notes_bfs_order() {
+        // A→B, A→C, B→D.
+        // related_notes("A", 2) should return B and C before D (hop-1 before hop-2).
+        let mut graph = LinkGraph::new();
+        let a = create_test_file("A.md", vec![]);
+        let b = create_test_file("B.md", vec![]);
+        let c = create_test_file("C.md", vec![]);
+        let d = create_test_file("D.md", vec![]);
+
+        graph.add_file(&a).unwrap();
+        graph.add_file(&b).unwrap();
+        graph.add_file(&c).unwrap();
+        graph.add_file(&d).unwrap();
+
+        // A links to B and C
+        let a_linked = {
+            let link_b = create_link_with_type("A.md", "B", LinkType::WikiLink);
+            let link_c = create_link_with_type("A.md", "C", LinkType::WikiLink);
+            let mut f = VaultFile::new(
+                PathBuf::from("A.md"),
+                String::new(),
+                FileMetadata {
+                    path: PathBuf::from("A.md"),
+                    size: 0,
+                    created_at: 0.0,
+                    modified_at: 0.0,
+                    checksum: String::new(),
+                    is_attachment: false,
+                },
+            );
+            f.links = vec![link_b, link_c];
+            f
+        };
+        graph.update_links(&a_linked).unwrap();
+
+        // B links to D
+        let b_linked = create_test_file_with_typed_link("B.md", "D", LinkType::WikiLink);
+        graph.update_links(&b_linked).unwrap();
+
+        let path_a = PathBuf::from("A.md");
+        let path_b = PathBuf::from("B.md");
+        let path_c = PathBuf::from("C.md");
+        let path_d = PathBuf::from("D.md");
+
+        let related = graph.related_notes(&path_a, 2).unwrap();
+
+        // All three of B, C, D must be present
+        assert!(related.contains(&path_b), "B should be related to A");
+        assert!(related.contains(&path_c), "C should be related to A");
+        assert!(related.contains(&path_d), "D should be related to A");
+
+        // B and C (hop 1) must appear before D (hop 2)
+        let pos_b = related.iter().position(|p| p == &path_b).unwrap();
+        let pos_c = related.iter().position(|p| p == &path_c).unwrap();
+        let pos_d = related.iter().position(|p| p == &path_d).unwrap();
+        let hop1_max = pos_b.max(pos_c);
+        assert!(
+            hop1_max < pos_d,
+            "B and C (hop 1) must appear before D (hop 2) in BFS order; got pos_b={}, pos_c={}, pos_d={}",
+            pos_b,
+            pos_c,
+            pos_d
+        );
+    }
+
+    // --- update_links creates file_index for nodes not previously add_file()'d ---
+
+    #[test]
+    fn test_update_links_creates_file_index_for_new_node() {
+        // Call update_links() for a source file that was never add_file()'d.
+        // The file should appear in the graph and be resolvable by stem.
+        let mut graph = LinkGraph::new();
+
+        // target.md is registered via add_file
+        let target = create_test_file("target.md", vec![]);
+        graph.add_file(&target).unwrap();
+
+        // source.md is never add_file()'d; update_links should create its node
+        // (and populate file_index so it can be resolved by others).
+        let source = create_test_file("source.md", vec!["target"]);
+        graph.update_links(&source).unwrap();
+
+        // source node must exist in the graph now
+        assert_eq!(graph.node_count(), 2);
+
+        // The edge source→target must exist
+        assert_eq!(graph.edge_count(), 1);
+        assert!(graph.all_unresolved_links().is_empty());
+
+        // source.md should be resolvable by stem: a third file linking to "source"
+        // should create an edge, not an unresolved link.
+        let third = create_test_file("third.md", vec!["source"]);
+        graph.add_file(&third).unwrap();
+        graph.update_links(&third).unwrap();
+
+        // Now we should have 2 edges: source→target and third→source
+        assert_eq!(graph.edge_count(), 2);
         assert!(graph.all_unresolved_links().is_empty());
     }
 }

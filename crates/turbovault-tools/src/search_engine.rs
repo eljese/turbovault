@@ -117,7 +117,11 @@ impl SearchQuery {
 pub struct SearchEngine {
     pub manager: Arc<VaultManager>,
     index: Index,
-    schema: Schema,
+    // Pre-resolved field handles — avoids runtime schema lookup and unwrap on every search
+    field_path: Field,
+    field_title: Field,
+    field_content: Field,
+    field_tags: Field,
 }
 
 impl SearchEngine {
@@ -130,6 +134,21 @@ impl SearchEngine {
         schema_builder.add_text_field("content", TEXT);
         schema_builder.add_text_field("tags", TEXT | STORED);
         let schema = schema_builder.build();
+
+        // Resolve field handles once at construction time — panic here is a programmer error
+        // (schema was just built with these exact field names above)
+        let field_path = schema
+            .get_field("path")
+            .expect("schema built with 'path' field");
+        let field_title = schema
+            .get_field("title")
+            .expect("schema built with 'title' field");
+        let field_content = schema
+            .get_field("content")
+            .expect("schema built with 'content' field");
+        let field_tags = schema
+            .get_field("tags")
+            .expect("schema built with 'tags' field");
 
         // Create in-memory index
         let index = Index::create_in_ram(schema.clone());
@@ -178,12 +197,12 @@ impl SearchEngine {
                     // Extract plain text for indexing (excludes markdown syntax, URLs, etc.)
                     let plain_content = to_plain_text(&vault_file.content);
 
-                    // Add document to index with plain text content
+                    // Add document to index with plain text content (use stored field handles)
                     let _ = index_writer.add_document(doc!(
-                        schema.get_field("path").unwrap() => path_str.clone(),
-                        schema.get_field("title").unwrap() => title,
-                        schema.get_field("content").unwrap() => plain_content,
-                        schema.get_field("tags").unwrap() => tags_str,
+                        field_path => path_str.clone(),
+                        field_title => title,
+                        field_content => plain_content,
+                        field_tags => tags_str,
                     ));
                 }
                 Err(_e) => {
@@ -199,7 +218,10 @@ impl SearchEngine {
         Ok(Self {
             manager,
             index,
-            schema,
+            field_path,
+            field_title,
+            field_content,
+            field_tags,
         })
     }
 
@@ -256,7 +278,7 @@ impl SearchEngine {
             .await?;
 
         // Sort by relevance (tantivy already scores, but ensure descending)
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        results.sort_by(|a, b| b.score.total_cmp(&a.score));
 
         Ok(results)
     }
@@ -286,23 +308,19 @@ impl SearchQuery {
         // Parse query using tantivy's QueryParser with fuzzy search enabled
         let mut query_parser = QueryParser::for_index(
             &engine.index,
-            vec![
-                engine.schema.get_field("title").unwrap(),
-                engine.schema.get_field("content").unwrap(),
-                engine.schema.get_field("tags").unwrap(),
-            ],
+            vec![engine.field_title, engine.field_content, engine.field_tags],
         );
 
         // Enable fuzzy search with Levenshtein distance of 1 for typo tolerance
         // This makes searches forgiving of single-character mistakes
         query_parser.set_field_fuzzy(
-            engine.schema.get_field("title").unwrap(),
+            engine.field_title,
             true,  // enable_fuzzy
             1,     // distance (1-2 char typos)
             false, // prefix_only
         );
-        query_parser.set_field_fuzzy(engine.schema.get_field("content").unwrap(), true, 1, false);
-        query_parser.set_field_fuzzy(engine.schema.get_field("tags").unwrap(), true, 1, false);
+        query_parser.set_field_fuzzy(engine.field_content, true, 1, false);
+        query_parser.set_field_fuzzy(engine.field_tags, true, 1, false);
 
         let query = query_parser
             .parse_query(&query_str)
@@ -322,41 +340,29 @@ impl SearchQuery {
                 .doc(doc_address)
                 .map_err(|e| Error::config_error(format!("Failed to retrieve doc: {}", e)))?;
 
-            // Convert to JSON string, then parse to Value
-            let doc_json_str = tantivy_doc.to_json(&engine.schema);
-            let doc_json: serde_json::Value =
-                serde_json::from_str(&doc_json_str).unwrap_or(serde_json::json!({}));
-
-            // Extract field values from the JSON document
-            // Note: Tantivy returns fields as arrays, so we need to get the first element
-            let path = doc_json
-                .get("path")
-                .and_then(|v| v.as_array())
-                .and_then(|arr| arr.first())
+            // Extract field values directly — avoids JSON serialize/deserialize round-trip
+            let path = tantivy_doc
+                .get_first(engine.field_path)
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default();
+                .unwrap_or("")
+                .to_string();
 
             // Deduplicate by path
             if !seen_paths.insert(path.clone()) {
                 continue;
             }
 
-            let title = doc_json
-                .get("title")
-                .and_then(|v| v.as_array())
-                .and_then(|arr| arr.first())
+            let title = tantivy_doc
+                .get_first(engine.field_title)
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default();
+                .unwrap_or("")
+                .to_string();
 
-            let tags_str = doc_json
-                .get("tags")
-                .and_then(|v| v.as_array())
-                .and_then(|arr| arr.first())
+            let tags_str = tantivy_doc
+                .get_first(engine.field_tags)
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default();
+                .unwrap_or("")
+                .to_string();
 
             let file_tags: Vec<String> =
                 tags_str.split_whitespace().map(|s| s.to_string()).collect();

@@ -8,7 +8,9 @@ use std::sync::LazyLock;
 use turbovault_core::{LineIndex, SourcePosition, Tag};
 
 /// Matches #tag or #parent/child tags
-static TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"#([a-zA-Z0-9_\-/]+)").unwrap());
+/// Matches #tag or #parent/child tags (with word-boundary guard to avoid URL fragments)
+static TAG_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:^|[\s\[(])#([a-zA-Z0-9_][a-zA-Z0-9_\-/]*)").unwrap());
 
 /// Parse all tags from content.
 ///
@@ -18,17 +20,16 @@ pub fn parse_tags(content: &str) -> Vec<Tag> {
     TAG_PATTERN
         .captures_iter(content)
         .map(|caps| {
-            let full_match = caps.get(0).unwrap();
-            let name = caps.get(1).unwrap().as_str();
+            let name_match = caps.get(1).unwrap();
+            let name = name_match.as_str();
             let is_nested = name.contains('/');
+            // Position at the `#` character (1 byte before the capture group)
+            let tag_start = name_match.start().saturating_sub(1);
+            let tag_len = name.len() + 1; // +1 for the `#`
 
             Tag {
                 name: name.to_string(),
-                position: SourcePosition::from_offset(
-                    content,
-                    full_match.start(),
-                    full_match.len(),
-                ),
+                position: SourcePosition::from_offset(content, tag_start, tag_len),
                 is_nested,
             }
         })
@@ -43,17 +44,15 @@ pub fn parse_tags_indexed(content: &str, index: &LineIndex) -> Vec<Tag> {
     TAG_PATTERN
         .captures_iter(content)
         .map(|caps| {
-            let full_match = caps.get(0).unwrap();
-            let name = caps.get(1).unwrap().as_str();
+            let name_match = caps.get(1).unwrap();
+            let name = name_match.as_str();
             let is_nested = name.contains('/');
+            let tag_start = name_match.start().saturating_sub(1);
+            let tag_len = name.len() + 1;
 
             Tag {
                 name: name.to_string(),
-                position: SourcePosition::from_offset_indexed(
-                    index,
-                    full_match.start(),
-                    full_match.len(),
-                ),
+                position: SourcePosition::from_offset_indexed(index, tag_start, tag_len),
                 is_nested,
             }
         })

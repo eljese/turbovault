@@ -65,25 +65,19 @@ impl HealthReport {
             return;
         }
 
-        let mut score: u8 = 100;
+        // Compute all penalties independently to avoid sequential saturation
+        let broken_ratio = self.broken_links.len() as f64 / self.total_links.max(1) as f64;
+        let orphaned_ratio = self.orphaned_notes.len() as f64 / self.total_notes as f64;
+        let isolated_ratio = self.isolated_clusters.len() as f64 / self.total_notes as f64;
+        let dead_end_ratio = self.dead_end_notes.len() as f64 / self.total_notes as f64;
 
-        // Penalize broken links (up to -30 points)
-        let broken_ratio = self.broken_links.len() as f32 / self.total_links.max(1) as f32;
-        score = score.saturating_sub((broken_ratio * 30.0) as u8);
+        let total_penalty = (broken_ratio * 30.0
+            + orphaned_ratio * 20.0
+            + isolated_ratio * 15.0
+            + dead_end_ratio * 10.0)
+            .min(100.0);
 
-        // Penalize orphaned notes (up to -20 points)
-        let orphaned_ratio = self.orphaned_notes.len() as f32 / self.total_notes as f32;
-        score = score.saturating_sub((orphaned_ratio * 20.0) as u8);
-
-        // Penalize isolated clusters (up to -15 points)
-        let isolated_ratio = self.isolated_clusters.len() as f32 / self.total_notes as f32;
-        score = score.saturating_sub((isolated_ratio * 15.0) as u8);
-
-        // Penalize dead ends (up to -10 points)
-        let dead_end_ratio = self.dead_end_notes.len() as f32 / self.total_notes as f32;
-        score = score.saturating_sub((dead_end_ratio * 10.0) as u8);
-
-        self.health_score = score;
+        self.health_score = 100u8.saturating_sub(total_penalty as u8);
     }
 
     /// Check if vault is healthy (score >= 80)
@@ -197,19 +191,17 @@ impl<'a> HealthAnalyzer<'a> {
                 }
             }
         } else {
-            // Fall back to graph links (less accurate - broken links won't be in graph)
-            for (source, links) in self.graph.all_links() {
+            // Fall back to graph's unresolved links (links that couldn't be resolved)
+            for (source, links) in self.graph.all_unresolved_links() {
                 for link in links {
-                    if !link.is_valid {
-                        let suggestions = self.suggest_targets(&link.target);
+                    let suggestions = self.suggest_targets(&link.target);
 
-                        broken.push(BrokenLink {
-                            source_file: source.clone(),
-                            target: link.target.clone(),
-                            line: link.position.line,
-                            suggestions,
-                        });
-                    }
+                    broken.push(BrokenLink {
+                        source_file: source.clone(),
+                        target: link.target.clone(),
+                        line: link.position.line,
+                        suggestions,
+                    });
                 }
             }
         }
@@ -256,19 +248,26 @@ impl<'a> HealthAnalyzer<'a> {
         Ok(hubs)
     }
 
-    /// Find isolated clusters using connected components analysis
+    /// Find isolated clusters using weakly connected components analysis.
+    /// Returns all components except the largest (the "main graph").
     fn find_isolated_clusters(&self) -> Result<Vec<Vec<PathBuf>>> {
-        let components = self.graph.connected_components()?;
+        let mut components = self.graph.connected_components()?;
 
-        // Find clusters that are isolated from the main graph
-        // A cluster is considered isolated if it has fewer than 3 nodes
-        // and no connections to larger clusters
-        let isolated: Vec<Vec<PathBuf>> = components
-            .into_iter()
-            .filter(|component| component.len() > 1 && component.len() < 5)
-            .collect();
+        if components.len() <= 1 {
+            return Ok(Vec::new());
+        }
 
-        Ok(isolated)
+        // Find the largest component (the "main graph") and remove it
+        let max_idx = components
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, c)| c.len())
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        components.remove(max_idx);
+
+        // Return all non-main components as isolated clusters (filter singletons)
+        Ok(components.into_iter().filter(|c| c.len() > 1).collect())
     }
 
     /// Suggest similar targets for a broken link
@@ -536,5 +535,326 @@ mod tests {
 
         report.health_score = 75;
         assert!(!report.is_healthy());
+    }
+
+    // --- score independence tests ---
+
+    #[test]
+    fn test_score_independent_penalties_all_broken_all_orphaned() {
+        // broken_ratio = 1.0 (10 broken / 10 total links) — penalty 30
+        // orphaned_ratio = 1.0 (10 orphaned / 10 total notes) — penalty 20
+        // total penalty = 50 → health_score = 50
+        let mut report = HealthReport::new();
+        report.total_notes = 10;
+        report.total_links = 10;
+        for i in 0..10 {
+            report.broken_links.push(BrokenLink {
+                source_file: PathBuf::from(format!("file{}.md", i)),
+                target: "broken".to_string(),
+                line: 1,
+                suggestions: Vec::new(),
+            });
+            report
+                .orphaned_notes
+                .push(PathBuf::from(format!("orphan{}.md", i)));
+        }
+        report.calculate_score();
+        // penalty = 30 + 20 = 50 → score = 50
+        assert_eq!(
+            report.health_score, 50,
+            "with all links broken and all notes orphaned the score should be 50"
+        );
+    }
+
+    #[test]
+    fn test_score_independent_penalties_small_broken_ratio() {
+        // 1 broken link out of 100 total links → broken_ratio = 0.01 → penalty = 0.3
+        // No orphans, no isolated clusters, no dead ends.
+        // total_penalty = 0.3 → cast to u8 = 0 → score = 100.
+        // The score should NOT round to 0; it stays at 100 due to truncating cast.
+        let mut report = HealthReport::new();
+        report.total_notes = 100;
+        report.total_links = 100;
+        report.broken_links.push(BrokenLink {
+            source_file: PathBuf::from("file1.md"),
+            target: "missing".to_string(),
+            line: 1,
+            suggestions: Vec::new(),
+        });
+        report.calculate_score();
+        // 0.01 * 30.0 = 0.3 → as u8 truncates to 0 → 100 - 0 = 100
+        assert_eq!(
+            report.health_score, 100,
+            "a single broken link out of 100 should not reduce score below 100 after integer truncation"
+        );
+    }
+
+    #[test]
+    fn test_score_independent_penalties_moderate_broken() {
+        // 5 broken out of 10 → broken_ratio = 0.5 → penalty = 15
+        // 3 orphans out of 10 → orphaned_ratio = 0.3 → penalty = 6
+        // total_penalty = 21.0 → health_score = 79
+        let mut report = HealthReport::new();
+        report.total_notes = 10;
+        report.total_links = 10;
+        for i in 0..5 {
+            report.broken_links.push(BrokenLink {
+                source_file: PathBuf::from(format!("f{}.md", i)),
+                target: "x".to_string(),
+                line: 0,
+                suggestions: Vec::new(),
+            });
+        }
+        for i in 0..3 {
+            report
+                .orphaned_notes
+                .push(PathBuf::from(format!("o{}.md", i)));
+        }
+        report.calculate_score();
+        // 0.5*30 + 0.3*20 = 15 + 6 = 21 → 100 - 21 = 79
+        assert_eq!(report.health_score, 79);
+    }
+
+    // --- isolated_clusters tests ---
+
+    #[test]
+    fn test_isolated_clusters_returns_non_main() {
+        // Large component: 10-node chain.
+        // Medium component: 3-node chain.
+        // Small component: 2-node chain.
+        // find_isolated_clusters() should return medium and small, not the large one.
+        let mut graph = LinkGraph::new();
+
+        // Build the 10-node chain: node0 → node1 → … → node9
+        for i in 0..10usize {
+            let f = create_test_file(&format!("main{}.md", i));
+            graph.add_file(&f).unwrap();
+        }
+        for i in 1..10usize {
+            let src = format!("main{}.md", i);
+            let tgt = format!("main{}", i - 1);
+            let link = Link {
+                type_: LinkType::WikiLink,
+                source_file: PathBuf::from(&src),
+                target: tgt,
+                display_text: None,
+                position: SourcePosition::start(),
+                resolved_target: None,
+                is_valid: true,
+            };
+            let mut f = create_test_file(&src);
+            f.links = vec![link];
+            graph.update_links(&f).unwrap();
+        }
+
+        // Medium: med0 → med1 → med2
+        for i in 0..3usize {
+            let f = create_test_file(&format!("med{}.md", i));
+            graph.add_file(&f).unwrap();
+        }
+        for i in 1..3usize {
+            let src = format!("med{}.md", i);
+            let tgt = format!("med{}", i - 1);
+            let link = Link {
+                type_: LinkType::WikiLink,
+                source_file: PathBuf::from(&src),
+                target: tgt,
+                display_text: None,
+                position: SourcePosition::start(),
+                resolved_target: None,
+                is_valid: true,
+            };
+            let mut f = create_test_file(&src);
+            f.links = vec![link];
+            graph.update_links(&f).unwrap();
+        }
+
+        // Small: small0 → small1
+        for i in 0..2usize {
+            let f = create_test_file(&format!("small{}.md", i));
+            graph.add_file(&f).unwrap();
+        }
+        {
+            let link = Link {
+                type_: LinkType::WikiLink,
+                source_file: PathBuf::from("small1.md"),
+                target: "small0".to_string(),
+                display_text: None,
+                position: SourcePosition::start(),
+                resolved_target: None,
+                is_valid: true,
+            };
+            let mut f = create_test_file("small1.md");
+            f.links = vec![link];
+            graph.update_links(&f).unwrap();
+        }
+
+        let analyzer = HealthAnalyzer::new(&graph);
+        let isolated = analyzer.find_isolated_clusters().unwrap();
+
+        // Should have exactly 2 non-main clusters (medium and small)
+        assert_eq!(
+            isolated.len(),
+            2,
+            "should return medium and small clusters, not the large one"
+        );
+
+        let mut sizes: Vec<usize> = isolated.iter().map(|c| c.len()).collect();
+        sizes.sort_unstable();
+        assert_eq!(
+            sizes,
+            vec![2, 3],
+            "non-main clusters should have sizes 2 and 3"
+        );
+
+        // Verify the large component (size 10) is NOT included
+        assert!(
+            isolated.iter().all(|c| c.len() < 10),
+            "the largest component (10 nodes) must not appear in isolated_clusters"
+        );
+    }
+
+    #[test]
+    fn test_isolated_clusters_single_component() {
+        // All nodes connected → no isolated clusters.
+        let mut graph = LinkGraph::new();
+        let a = create_test_file("ca.md");
+        let b = create_test_file("cb.md");
+        let c = create_test_file("cc.md");
+        graph.add_file(&a).unwrap();
+        graph.add_file(&b).unwrap();
+        graph.add_file(&c).unwrap();
+
+        // a → b → c
+        let link_b = Link {
+            type_: LinkType::WikiLink,
+            source_file: PathBuf::from("cb.md"),
+            target: "ca".to_string(),
+            display_text: None,
+            position: SourcePosition::start(),
+            resolved_target: None,
+            is_valid: true,
+        };
+        let mut fb = create_test_file("cb.md");
+        fb.links = vec![link_b];
+        graph.update_links(&fb).unwrap();
+
+        let link_c = Link {
+            type_: LinkType::WikiLink,
+            source_file: PathBuf::from("cc.md"),
+            target: "cb".to_string(),
+            display_text: None,
+            position: SourcePosition::start(),
+            resolved_target: None,
+            is_valid: true,
+        };
+        let mut fc = create_test_file("cc.md");
+        fc.links = vec![link_c];
+        graph.update_links(&fc).unwrap();
+
+        let analyzer = HealthAnalyzer::new(&graph);
+        let isolated = analyzer.find_isolated_clusters().unwrap();
+        assert!(
+            isolated.is_empty(),
+            "single component should return no isolated clusters"
+        );
+    }
+
+    #[test]
+    fn test_isolated_clusters_singletons_filtered() {
+        // Large component of 5 nodes plus several singleton orphans.
+        // find_isolated_clusters() filters singletons (len == 1).
+        let mut graph = LinkGraph::new();
+
+        // Build 5-node chain: hub0 → hub1 → hub2 → hub3 → hub4
+        for i in 0..5usize {
+            let f = create_test_file(&format!("hub{}.md", i));
+            graph.add_file(&f).unwrap();
+        }
+        for i in 1..5usize {
+            let src = format!("hub{}.md", i);
+            let tgt = format!("hub{}", i - 1);
+            let link = Link {
+                type_: LinkType::WikiLink,
+                source_file: PathBuf::from(&src),
+                target: tgt,
+                display_text: None,
+                position: SourcePosition::start(),
+                resolved_target: None,
+                is_valid: true,
+            };
+            let mut f = create_test_file(&src);
+            f.links = vec![link];
+            graph.update_links(&f).unwrap();
+        }
+
+        // Add 3 singleton orphans (no links whatsoever)
+        for i in 0..3usize {
+            let f = create_test_file(&format!("singleton{}.md", i));
+            graph.add_file(&f).unwrap();
+        }
+
+        let analyzer = HealthAnalyzer::new(&graph);
+        let isolated = analyzer.find_isolated_clusters().unwrap();
+
+        // Singletons must be filtered out; result should be empty
+        // (the hub chain is the main component, singletons are len==1 → filtered)
+        assert!(
+            isolated.is_empty(),
+            "singleton orphans should be filtered from isolated_clusters; got: {:?}",
+            isolated
+        );
+    }
+
+    // --- broken_links fallback to unresolved_links ---
+
+    #[test]
+    fn test_broken_links_fallback_uses_unresolved() {
+        // HealthAnalyzer::new() (no `files` map) should fall back to
+        // graph.all_unresolved_links() when find_broken_links() is called.
+        let mut graph = LinkGraph::new();
+
+        // target.md exists; missing.md does not.
+        let target = create_test_file("target.md");
+        graph.add_file(&target).unwrap();
+
+        // source.md links to both; "missing" will become an unresolved link.
+        let missing_link = Link {
+            type_: LinkType::WikiLink,
+            source_file: PathBuf::from("source.md"),
+            target: "missing".to_string(),
+            display_text: None,
+            position: SourcePosition::start(),
+            resolved_target: None,
+            is_valid: true,
+        };
+        let valid_link = Link {
+            type_: LinkType::WikiLink,
+            source_file: PathBuf::from("source.md"),
+            target: "target".to_string(),
+            display_text: None,
+            position: SourcePosition::start(),
+            resolved_target: None,
+            is_valid: true,
+        };
+        let mut source = create_test_file("source.md");
+        source.links = vec![missing_link, valid_link];
+        graph.add_file(&source).unwrap();
+        graph.update_links(&source).unwrap();
+
+        // Confirm the graph has tracked the unresolved link
+        assert_eq!(graph.unresolved_link_count(), 1);
+
+        // Use HealthAnalyzer::new() — no files map → fallback path
+        let analyzer = HealthAnalyzer::new(&graph);
+        let broken = analyzer.find_broken_links().unwrap();
+
+        assert_eq!(
+            broken.len(),
+            1,
+            "fallback should surface the one unresolved link"
+        );
+        assert_eq!(broken[0].target, "missing");
+        assert_eq!(broken[0].source_file, PathBuf::from("source.md"));
     }
 }

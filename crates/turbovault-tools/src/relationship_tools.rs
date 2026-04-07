@@ -182,8 +182,8 @@ impl RelationshipTools {
             }
         }
 
-        // Sort by strength descending
-        suggestions.sort_by(|a, b| b.strength.partial_cmp(&a.strength).unwrap());
+        // Sort by strength descending (total_cmp is panic-free for f64)
+        suggestions.sort_by(|a, b| b.strength.total_cmp(&a.strength));
 
         // Take top N
         let results: Vec<_> = suggestions
@@ -210,20 +210,21 @@ impl RelationshipTools {
         let read = graph.read().await;
 
         let all_files = read.all_files();
+        // Pre-compute all_count once outside the loop to avoid O(N²) Vec allocation
+        let all_count = all_files.len() as f64;
 
         // Simple heuristic-based centrality calculation
         let mut rankings: Vec<(String, f64, HashMap<&str, f64>)> = Vec::new();
 
-        for file in all_files {
+        for file in &all_files {
             let file_str = file.to_string_lossy().to_string();
 
             // Betweenness: count edges if this file connects two others
-            let forward = read.forward_links(&file).unwrap_or_default().len() as f64;
-            let backward = read.backlinks(&file).unwrap_or_default().len() as f64;
+            let forward = read.forward_links(file).unwrap_or_default().len() as f64;
+            let backward = read.backlinks(file).unwrap_or_default().len() as f64;
             let betweenness = ((forward + backward) / 10.0).min(1.0);
 
             // Closeness: ability to reach others (normalized edge count)
-            let all_count = read.all_files().len() as f64;
             let closeness = (forward / all_count).min(1.0);
 
             // Eigenvector: importance based on connection to important files
@@ -241,8 +242,8 @@ impl RelationshipTools {
             rankings.push((file_str, combined, metrics));
         }
 
-        // Sort by combined score descending
-        rankings.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        // Sort by combined score descending (total_cmp is panic-free for f64)
+        rankings.sort_by(|a, b| b.1.total_cmp(&a.1));
 
         // Build result
         let ranked: Vec<_> = rankings

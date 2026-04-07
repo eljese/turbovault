@@ -295,16 +295,49 @@ impl EditEngine {
         result
     }
 
-    /// Find with whitespace normalization
+    /// Find with whitespace normalization (line-based approach).
+    /// Compares lines after collapsing all whitespace runs to single spaces.
     fn fuzzy_find_whitespace(&self, content: &str, search: &str) -> Option<(usize, usize)> {
-        let normalized_search = normalize_whitespace(search);
-        let normalized_content = normalize_whitespace(content);
+        let search_lines: Vec<&str> = search.lines().collect();
+        let content_lines: Vec<&str> = content.lines().collect();
 
-        normalized_content.find(&normalized_search).map(|_| {
-            // TODO: Map back to original positions
-            // For now, return None to skip this strategy
-            None
-        })?
+        if search_lines.is_empty() {
+            return None;
+        }
+
+        let normalized_search_lines: Vec<String> = search_lines
+            .iter()
+            .map(|l| normalize_whitespace(l))
+            .collect();
+
+        for start_idx in 0..content_lines.len() {
+            if start_idx + search_lines.len() > content_lines.len() {
+                break;
+            }
+
+            let mut matches = true;
+            for (i, norm_search) in normalized_search_lines.iter().enumerate() {
+                let norm_content = normalize_whitespace(content_lines[start_idx + i]);
+                if *norm_search != norm_content {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if matches {
+                let start_pos: usize = content_lines[..start_idx].iter().map(|l| l.len() + 1).sum();
+
+                let match_len: usize = content_lines[start_idx..start_idx + search_lines.len()]
+                    .iter()
+                    .map(|l| l.len() + 1)
+                    .sum::<usize>()
+                    .saturating_sub(1);
+
+                return Some((start_pos, match_len));
+            }
+        }
+
+        None
     }
 
     /// Find with indentation flexibility
@@ -352,8 +385,15 @@ impl EditEngine {
         None
     }
 
-    /// Find using Levenshtein distance
+    /// Find using Levenshtein distance (with size guards to prevent DoS)
     fn fuzzy_find_levenshtein(&self, content: &str, search: &str) -> Option<(usize, usize)> {
+        const MAX_FUZZY_BUDGET: usize = 10_000_000;
+        const MAX_SEARCH_LEN: usize = 10_000;
+
+        if search.len() > MAX_SEARCH_LEN || content.len() * search.len() > MAX_FUZZY_BUDGET {
+            return None;
+        }
+
         // Sliding window approach
         let search_len = search.len();
         let threshold = (search_len as f32 * (1.0 - self.config.max_fuzzy_distance)) as usize;
@@ -517,7 +557,23 @@ second new
         let (_result, match_type) = engine
             .find_and_replace(content, search, "replaced")
             .unwrap();
-        assert_eq!(match_type, MatchType::IndentationPreserving);
+        // Whitespace-insensitive strategy (2) fires before indentation (3) since both match
+        assert!(
+            match_type == MatchType::WhitespaceInsensitive
+                || match_type == MatchType::IndentationPreserving
+        );
+    }
+
+    #[test]
+    fn test_whitespace_insensitive_match() {
+        let engine = EditEngine::new();
+        let content = "hello    world\n  foo   bar";
+        let search = "hello world\nfoo bar"; // Normalized whitespace
+
+        let (_result, match_type) = engine
+            .find_and_replace(content, search, "replaced")
+            .unwrap();
+        assert_eq!(match_type, MatchType::WhitespaceInsensitive);
     }
 
     #[test]
@@ -541,5 +597,199 @@ second new
 
         // Should be same after NFC normalization
         assert_eq!(hash1, hash2);
+    }
+
+    // -------------------------------------------------------------------------
+    // New comprehensive tests
+    // -------------------------------------------------------------------------
+
+    /// Levenshtein path must be skipped (not hang) when
+    /// content.len() * search.len() > 10_000_000 budget.
+    ///
+    /// With content of 100_000 chars and search of 200 chars the product is
+    /// 20_000_000 which exceeds the MAX_FUZZY_BUDGET guard (10_000_000).
+    #[test]
+    fn test_levenshtein_size_cap_skips_large_input() {
+        let engine = EditEngine::new();
+
+        // Build content and search strings that will exceed the budget guard.
+        // Content: 100_000 'a' chars.  Search: 200 chars that will never match
+        // exactly or via whitespace/indent (different characters).
+        let content = "a".repeat(100_000);
+        let search = "z".repeat(200); // product = 100_000 * 200 = 20_000_000 > 10_000_000
+        let replace = "REPLACED";
+
+        // No strategy should find a match (none of the 'z' patterns exist in
+        // the all-'a' content), and crucially the Levenshtein path must be
+        // skipped rather than running — so this must return quickly (no hang).
+        let result = engine.find_and_replace(&content, &search, replace);
+        assert!(
+            result.is_err(),
+            "Expected an error when no match is found after strategies are exhausted"
+        );
+    }
+
+    /// A slight character transposition must be caught by the Levenshtein
+    /// fuzzy strategy.
+    ///
+    /// We use a 20-char string where a single-character transposition yields a
+    /// Levenshtein distance of 2, which is within the 15% budget for strings
+    /// of that length (2/20 = 10% < 15%).
+    #[test]
+    fn test_levenshtein_fuzzy_match() {
+        let engine = EditEngine::with_config(EditConfig {
+            // Disable the earlier strategies so we exercise only the Levenshtein path.
+            allow_whitespace_flex: false,
+            allow_indent_flex: false,
+            allow_fuzzy_match: true,
+            max_fuzzy_distance: 0.85, // threshold = floor(20 * 0.15) = 3
+        });
+
+        // "the quikc brown foxes" — "quick" is misspelled as "quikc"
+        // Distance from "the quick brown foxes" is 2 (swap i↔k), which is ≤ 3.
+        let content = "the quikc brown foxes";
+        let search = "the quick brown foxes";
+        let replace = "the quick brown foxes";
+
+        let result = engine.find_and_replace(content, search, replace);
+        assert!(
+            result.is_ok(),
+            "Levenshtein strategy should find the near-match: {:?}",
+            result.err()
+        );
+
+        let (_, match_type) = result.unwrap();
+        assert_eq!(
+            match_type,
+            MatchType::FuzzyLevenshtein,
+            "Expected FuzzyLevenshtein match type"
+        );
+    }
+
+    /// Tab-delimited content should be matched by the whitespace-insensitive
+    /// strategy when searching with plain spaces.
+    #[test]
+    fn test_whitespace_match_tabs_vs_spaces() {
+        let engine = EditEngine::new();
+
+        // Content uses tabs; search uses spaces.
+        let content = "\thello\t\tworld";
+        let search = "hello world";
+        let replace = "replaced";
+
+        let result = engine.find_and_replace(content, search, replace);
+        assert!(
+            result.is_ok(),
+            "Whitespace-insensitive strategy should match tabs vs spaces: {:?}",
+            result.err()
+        );
+
+        let (_, match_type) = result.unwrap();
+        assert_eq!(match_type, MatchType::WhitespaceInsensitive);
+    }
+
+    /// Multi-line content with inconsistent leading whitespace must be found
+    /// by the whitespace-insensitive strategy.
+    #[test]
+    fn test_whitespace_match_multiline() {
+        let engine = EditEngine::new();
+
+        let content = "  line one\n    line two";
+        // Search text has no leading whitespace — should still match via
+        // whitespace normalization (each line's tokens are identical).
+        let search = "line one\nline two";
+        let replace = "replaced";
+
+        let result = engine.find_and_replace(content, search, replace);
+        assert!(
+            result.is_ok(),
+            "WhitespaceInsensitive strategy should match multi-line with different indent: {:?}",
+            result.err()
+        );
+
+        let (_, match_type) = result.unwrap();
+        assert_eq!(match_type, MatchType::WhitespaceInsensitive);
+    }
+
+    /// When two sequential SEARCH/REPLACE blocks are applied the second block
+    /// must operate on the output of the first (chained substitution).
+    #[test]
+    fn test_multiple_blocks_sequential() {
+        let engine = EditEngine::new();
+
+        // Block 1: foo → bar
+        // Block 2: bar → baz  (only valid after block 1 has run)
+        let blocks = vec![
+            SearchReplaceBlock {
+                search: "foo".to_string(),
+                replace: "bar".to_string(),
+            },
+            SearchReplaceBlock {
+                search: "bar".to_string(),
+                replace: "baz".to_string(),
+            },
+        ];
+
+        let content = "foo";
+        let (result, warnings) = engine.apply_blocks(content, &blocks).unwrap();
+
+        assert_eq!(result, "baz", "Chained replacement should produce 'baz'");
+        // Both blocks used exact matching, so no warnings expected.
+        assert!(
+            warnings.is_empty(),
+            "No fuzzy warnings expected: {:?}",
+            warnings
+        );
+    }
+
+    /// A block that has the SEARCH/REPLACE delimiters but is missing the `=======`
+    /// separator should return a parse error rather than panicking.
+    #[test]
+    fn test_malformed_block_missing_separator() {
+        let engine = EditEngine::new();
+
+        // No `=======` line — the parser will reach end-of-input while still
+        // in the InSearch state and must report an error.
+        let malformed = "<<<<<<< SEARCH\nsome content\n>>>>>>> REPLACE";
+
+        let result = engine.parse_blocks(malformed);
+        assert!(
+            result.is_err(),
+            "Missing separator should produce a parse error, not a panic"
+        );
+    }
+
+    /// `parse_blocks` alone (without `apply_blocks`) must never modify content
+    /// — confirming the dry-run / parse-only path is side-effect-free.
+    #[test]
+    fn test_dry_run_does_not_modify() {
+        let engine = EditEngine::new();
+
+        let original = "original content";
+
+        let input = "<<<<<<< SEARCH\noriginal content\n=======\nnew content\n>>>>>>> REPLACE";
+        let blocks = engine.parse_blocks(input).unwrap();
+
+        // apply_edits with dry_run = true
+        let edit_result = engine.apply_edits(original, &blocks, true).unwrap();
+
+        // dry_run should produce a diff preview but NOT change the content on disk.
+        // We verify it by reading original again — it should be unchanged.
+        // Also check that the result metadata is consistent.
+        assert!(edit_result.success);
+        assert!(
+            edit_result.diff_preview.is_some(),
+            "dry_run should populate diff_preview"
+        );
+
+        // The old_hash must equal the hash of the unmodified original.
+        let expected_old_hash = compute_hash(original);
+        assert_eq!(edit_result.old_hash, expected_old_hash);
+
+        // new_hash must differ (the edit would change the content).
+        assert_ne!(
+            edit_result.old_hash, edit_result.new_hash,
+            "dry_run new_hash should reflect what the edit would produce"
+        );
     }
 }

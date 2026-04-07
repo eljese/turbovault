@@ -35,7 +35,7 @@ static EMBED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[([^\]]+)\]\]"
 
 /// Tag: #tag or #parent/child (but not inside words or URLs)
 static TAG: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:^|[\s\[(])#([a-zA-Z][a-zA-Z0-9_\-/]*)").unwrap());
+    LazyLock::new(|| Regex::new(r"(?:^|[\s\[(])#([a-zA-Z0-9_][a-zA-Z0-9_\-/]*)").unwrap());
 
 /// Callout start: > [!TYPE] with optional fold marker and title
 static CALLOUT: LazyLock<Regex> =
@@ -364,10 +364,19 @@ impl<'a> ParseEngine<'a> {
                 }
 
                 // === Tasks ===
-                Event::TaskListMarker(checked) => {
+                Event::TaskListMarker(_checked) => {
                     if options.parse_tasks {
                         in_task_item = true;
-                        task_checked = checked;
+                        // Read raw marker byte to detect extended states [/] [-]
+                        task_checked = {
+                            let raw_marker =
+                                self.content
+                                    .as_bytes()
+                                    .get(range.start + 1)
+                                    .copied()
+                                    .unwrap_or(b' ') as char;
+                            crate::models::TaskStatus::from_marker(raw_marker).is_completed()
+                        };
                         task_content.clear();
                         task_start = range.start;
                     }
@@ -683,7 +692,16 @@ impl<'a> ParseEngine<'a> {
             let line = lines[i];
             let line_start = offset;
             let global_line_start = body_offset + line_start;
-            offset += line.len() + 1; // +1 for newline
+            // Account for both \n and \r\n line endings
+            let remaining = &body[offset + line.len()..];
+            let line_end_size = if remaining.starts_with("\r\n") {
+                2
+            } else if remaining.starts_with('\n') {
+                1
+            } else {
+                0
+            };
+            offset += line.len() + line_end_size;
 
             // Skip if this line is in an excluded range
             if excluded.contains(global_line_start) {
@@ -1426,5 +1444,94 @@ Back to normal [[Valid]]
 
         assert_eq!(result.wikilinks.len(), 1);
         assert_eq!(result.wikilinks[0].target, "Link");
+    }
+
+    // =========================================================================
+    // Tag regex and TaskStatus integration tests
+    // =========================================================================
+
+    #[test]
+    fn test_digit_first_tag() {
+        // Tags that start with a digit should be extracted; the regex allows [a-zA-Z0-9_]
+        // as the first character of the tag name.
+        let content = "#2024 is a year";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        let names: Vec<&str> = result.tags.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            names.contains(&"2024"),
+            "expected tag '2024' in {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn test_numeric_tag_with_subtag() {
+        let content = "#2024/q1";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        let names: Vec<&str> = result.tags.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            names.contains(&"2024/q1"),
+            "expected tag '2024/q1' in {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn test_tag_in_url_not_matched() {
+        // The # in a URL fragment is preceded by a non-whitespace word character,
+        // so the look-behind `(?:^|[\s\[(])` should prevent a match.
+        let content = "See https://example.com#section for details";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        let names: Vec<&str> = result.tags.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            !names.contains(&"section"),
+            "tag 'section' should NOT be extracted from a URL fragment, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn test_task_status_in_progress() {
+        // pulldown-cmark's ENABLE_TASKLISTS only fires TaskListMarker for [ ] and [x]/[X].
+        // Non-standard Obsidian markers like [/] are not recognised by the CommonMark
+        // task-list extension and therefore produce no TaskItem in result.tasks.
+        // The raw-marker → TaskStatus mapping (from_marker('/') == InProgress) is
+        // exercised separately in models::tests::test_from_marker_in_progress.
+        let content = "- [/] In progress task";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        // The item is a plain list bullet, not a task list item
+        assert_eq!(
+            result.tasks.len(),
+            0,
+            "pulldown-cmark does not recognise [/] as a task marker; \
+             non-standard markers are not emitted as TaskListMarker events"
+        );
+    }
+
+    #[test]
+    fn test_task_status_cancelled() {
+        // Same reasoning as test_task_status_in_progress: [-] is not a standard
+        // CommonMark task-list marker, so pulldown-cmark does not fire a
+        // TaskListMarker event for it.
+        // The raw-marker → TaskStatus mapping (from_marker('-') == Cancelled) is
+        // exercised separately in models::tests::test_from_marker_cancelled.
+        let content = "- [-] Cancelled task";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert_eq!(
+            result.tasks.len(),
+            0,
+            "pulldown-cmark does not recognise [-] as a task marker; \
+             non-standard markers are not emitted as TaskListMarker events"
+        );
     }
 }

@@ -1,13 +1,24 @@
 # syntax=docker/dockerfile:1.9
-FROM rust:latest as builder
+# Multi-stage build for Rust TurboVault Server
+
+# Stage 1: Builder
+FROM rust:1.90-bookworm as builder
+
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-# Build with minimal features for STDIO performance
+# Build server in release mode
 RUN cargo build --release --package turbovault
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+# Stage 2: Runtime
+FROM debian:bookworm-slim as runtime
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy binary from builder
 COPY --from=builder /build/target/release/turbovault /usr/local/bin/
 
 # Match NFS permissions

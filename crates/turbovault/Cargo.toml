@@ -65,7 +65,6 @@ config = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
-env_logger = { workspace = true }
 simple_logger = "5.0"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

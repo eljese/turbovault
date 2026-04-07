@@ -131,12 +131,12 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
+use turbovault_core::TransactionBuilder;
 use turbovault_core::prelude::*;
-use turbovault_core::{PathValidator, TransactionBuilder};
 use turbovault_vault::VaultManager;
 
 /// Individual batch operation to execute
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type")]
 pub enum BatchOperation {
     /// Create a new note with content
@@ -244,16 +244,14 @@ pub struct BatchResult {
 }
 
 /// Batch executor with transaction support
-#[allow(dead_code)]
 pub struct BatchExecutor {
     manager: Arc<VaultManager>,
-    temp_dir: PathBuf,
 }
 
 impl BatchExecutor {
     /// Create a new batch executor
-    pub fn new(manager: Arc<VaultManager>, temp_dir: PathBuf) -> Self {
-        Self { manager, temp_dir }
+    pub fn new(manager: Arc<VaultManager>, _temp_dir: PathBuf) -> Self {
+        Self { manager }
     }
 
     /// Validate batch operations before execution
@@ -373,43 +371,15 @@ impl BatchExecutor {
             }
 
             BatchOperation::DeleteNote { path } => {
-                let full_path = PathValidator::validate_path_in_vault(
-                    self.manager.vault_path(),
-                    &PathBuf::from(path),
-                )?;
-
-                tokio::fs::remove_file(&full_path).await.map_err(|e| {
-                    Error::config_error(format!("Failed to delete {}: {}", path, e))
-                })?;
-
+                let path_buf = PathBuf::from(path);
+                self.manager.delete_file(&path_buf, None).await?;
                 Ok(format!("Deleted: {}", path))
             }
 
             BatchOperation::MoveNote { from, to } => {
-                let from_path = PathValidator::validate_path_in_vault(
-                    self.manager.vault_path(),
-                    &PathBuf::from(from),
-                )?;
-                let to_path = PathValidator::validate_path_in_vault(
-                    self.manager.vault_path(),
-                    &PathBuf::from(to),
-                )?;
-
-                // Create parent directory if needed
-                if let Some(parent) = to_path.parent() {
-                    tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                        Error::config_error(format!(
-                            "Failed to create parent dirs for {}: {}",
-                            to, e
-                        ))
-                    })?;
-                }
-
-                // Perform rename
-                tokio::fs::rename(&from_path, &to_path).await.map_err(|e| {
-                    Error::config_error(format!("Failed to move {} to {}: {}", from, to, e))
-                })?;
-
+                let from_buf = PathBuf::from(from);
+                let to_buf = PathBuf::from(to);
+                self.manager.move_file(&from_buf, &to_buf, None).await?;
                 Ok(format!("Moved: {} → {}", from, to))
             }
 
@@ -446,6 +416,8 @@ impl BatchExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+    use turbovault_core::prelude::ServerConfig;
 
     #[test]
     fn test_operation_affected_files() {
@@ -485,5 +457,189 @@ mod tests {
         };
 
         assert!(!op1.conflicts_with(&op2));
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    fn make_config(vault_dir: &std::path::Path) -> ServerConfig {
+        use turbovault_core::config::VaultConfig;
+        let mut config = ServerConfig::new();
+        let vault_config = VaultConfig::builder("test", vault_dir).build().unwrap();
+        config.vaults.push(vault_config);
+        config
+    }
+
+    async fn make_executor(temp: &TempDir) -> BatchExecutor {
+        let config = make_config(temp.path());
+        let manager = Arc::new(VaultManager::new(config).unwrap());
+        manager.initialize().await.unwrap();
+        BatchExecutor::new(manager, temp.path().to_path_buf())
+    }
+
+    // ── BatchExecutor integration tests ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_batch_create_note() {
+        let temp = TempDir::new().unwrap();
+        let executor = make_executor(&temp).await;
+
+        let result = executor
+            .execute(vec![BatchOperation::CreateNote {
+                path: "hello.md".to_string(),
+                content: "# Hello World".to_string(),
+            }])
+            .await
+            .unwrap();
+
+        assert!(result.success, "batch should succeed: {:?}", result.errors);
+        assert_eq!(result.executed, 1);
+        assert_eq!(result.total, 1);
+
+        let on_disk = std::fs::read_to_string(temp.path().join("hello.md")).unwrap();
+        assert_eq!(on_disk, "# Hello World");
+    }
+
+    #[tokio::test]
+    async fn test_batch_write_note() {
+        let temp = TempDir::new().unwrap();
+        // Pre-create the file so WriteNote has something to overwrite.
+        std::fs::write(temp.path().join("existing.md"), "old content").unwrap();
+
+        let executor = make_executor(&temp).await;
+        let result = executor
+            .execute(vec![BatchOperation::WriteNote {
+                path: "existing.md".to_string(),
+                content: "new content".to_string(),
+            }])
+            .await
+            .unwrap();
+
+        assert!(result.success, "batch should succeed: {:?}", result.errors);
+
+        let on_disk = std::fs::read_to_string(temp.path().join("existing.md")).unwrap();
+        assert_eq!(on_disk, "new content");
+    }
+
+    #[tokio::test]
+    async fn test_batch_delete_note() {
+        let temp = TempDir::new().unwrap();
+        std::fs::write(temp.path().join("to_delete.md"), "delete me").unwrap();
+
+        let executor = make_executor(&temp).await;
+        let result = executor
+            .execute(vec![BatchOperation::DeleteNote {
+                path: "to_delete.md".to_string(),
+            }])
+            .await
+            .unwrap();
+
+        assert!(result.success, "batch should succeed: {:?}", result.errors);
+        assert!(!temp.path().join("to_delete.md").exists());
+    }
+
+    #[tokio::test]
+    async fn test_batch_move_note() {
+        let temp = TempDir::new().unwrap();
+        std::fs::write(temp.path().join("source.md"), "move me").unwrap();
+
+        let executor = make_executor(&temp).await;
+        let result = executor
+            .execute(vec![BatchOperation::MoveNote {
+                from: "source.md".to_string(),
+                to: "destination.md".to_string(),
+            }])
+            .await
+            .unwrap();
+
+        assert!(result.success, "batch should succeed: {:?}", result.errors);
+        assert!(
+            !temp.path().join("source.md").exists(),
+            "old path should be gone"
+        );
+        let on_disk = std::fs::read_to_string(temp.path().join("destination.md")).unwrap();
+        assert_eq!(on_disk, "move me");
+    }
+
+    #[tokio::test]
+    async fn test_batch_multiple_operations() {
+        let temp = TempDir::new().unwrap();
+        let executor = make_executor(&temp).await;
+
+        // Create → overwrite → move: all on non-conflicting paths
+        let ops = vec![
+            BatchOperation::CreateNote {
+                path: "alpha.md".to_string(),
+                content: "alpha v1".to_string(),
+            },
+            BatchOperation::CreateNote {
+                path: "beta.md".to_string(),
+                content: "beta v1".to_string(),
+            },
+            BatchOperation::CreateNote {
+                path: "gamma.md".to_string(),
+                content: "gamma".to_string(),
+            },
+        ];
+
+        let result = executor.execute(ops).await.unwrap();
+
+        assert!(
+            result.success,
+            "all ops should succeed: {:?}",
+            result.errors
+        );
+        assert_eq!(result.executed, 3);
+        assert_eq!(result.total, 3);
+
+        assert!(temp.path().join("alpha.md").exists());
+        assert!(temp.path().join("beta.md").exists());
+        assert!(temp.path().join("gamma.md").exists());
+    }
+
+    #[tokio::test]
+    async fn test_batch_failure_in_middle() {
+        let temp = TempDir::new().unwrap();
+        // op[0] will succeed (creates a new file)
+        // op[1] will fail  (deletes a file that does not exist)
+        let executor = make_executor(&temp).await;
+
+        let ops = vec![
+            BatchOperation::CreateNote {
+                path: "succeeds.md".to_string(),
+                content: "I was created".to_string(),
+            },
+            BatchOperation::DeleteNote {
+                path: "nonexistent.md".to_string(),
+            },
+        ];
+
+        let result = executor.execute(ops).await.unwrap();
+
+        // Batch as a whole failed
+        assert!(!result.success, "batch should report failure");
+        assert_eq!(result.failed_at, Some(1));
+        assert!(!result.errors.is_empty());
+
+        // But op[0] already happened (non-transactional per implementation)
+        assert!(
+            temp.path().join("succeeds.md").exists(),
+            "op[0] side-effect should persist"
+        );
+        let on_disk = std::fs::read_to_string(temp.path().join("succeeds.md")).unwrap();
+        assert_eq!(on_disk, "I was created");
+    }
+
+    #[tokio::test]
+    async fn test_batch_empty_operations() {
+        let temp = TempDir::new().unwrap();
+        let executor = make_executor(&temp).await;
+
+        // Empty batch is rejected by validate(), so execute() returns Ok with success=false
+        let result = executor.execute(vec![]).await.unwrap();
+
+        assert!(!result.success);
+        assert_eq!(result.executed, 0);
+        assert_eq!(result.total, 0);
+        assert!(!result.errors.is_empty(), "should report why it failed");
     }
 }

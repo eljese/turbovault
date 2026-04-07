@@ -76,9 +76,19 @@ impl MultiVaultManager {
         })
     }
 
+    /// Maximum number of vaults that can be registered simultaneously
+    const MAX_VAULTS: usize = 50;
+
     /// Add a new vault to the manager
     pub async fn add_vault(&self, vault_config: VaultConfig) -> Result<()> {
         let mut vaults = self.vaults.write().await;
+
+        if vaults.len() >= Self::MAX_VAULTS {
+            return Err(Error::config_error(format!(
+                "Maximum vault limit ({}) reached. Remove a vault before adding a new one.",
+                Self::MAX_VAULTS
+            )));
+        }
 
         if vaults.contains_key(&vault_config.name) {
             return Err(Error::invalid_path(format!(
@@ -385,5 +395,61 @@ mod tests {
         let manager2 = manager.clone();
 
         assert_eq!(manager.vault_count().await, manager2.vault_count().await);
+    }
+
+    /// Verify that removing the currently-active vault automatically
+    /// reassigns the active vault to another registered vault.
+    #[tokio::test]
+    async fn test_remove_active_vault_reassigns() {
+        let config = create_test_config(); // vault1 (default) + vault2
+        let manager = MultiVaultManager::new(config).unwrap();
+
+        // Make vault2 active so we can remove vault1 and confirm reassignment
+        manager.set_active_vault("vault2").await.unwrap();
+        assert_eq!(manager.get_active_vault().await, "vault2");
+
+        // Remove the non-active vault (vault1) — active should stay vault2
+        manager.remove_vault("vault1").await.unwrap();
+        assert!(!manager.vault_exists("vault1").await);
+        assert_eq!(
+            manager.get_active_vault().await,
+            "vault2",
+            "active vault should remain vault2 after vault1 is removed"
+        );
+
+        // Now remove the active vault (vault2) — active should be cleared/empty
+        // because no other vaults remain
+        manager.remove_vault("vault2").await.unwrap();
+        assert!(!manager.vault_exists("vault2").await);
+        let active_after = manager.get_active_vault().await;
+        assert!(
+            active_after.is_empty(),
+            "active vault should be empty when last vault is removed, got: {:?}",
+            active_after
+        );
+    }
+
+    /// Verify that adding more than MAX_VAULTS (50) vaults returns an error.
+    #[tokio::test]
+    async fn test_add_vault_at_max_limit() {
+        let config = ServerConfig::new(); // start empty
+        let manager = MultiVaultManager::new(config).unwrap();
+
+        // Fill up to the limit
+        for i in 0..MultiVaultManager::MAX_VAULTS {
+            let vault = create_test_vault(&format!("vault{}", i), i == 0);
+            manager.add_vault(vault).await.unwrap();
+        }
+
+        assert_eq!(manager.vault_count().await, MultiVaultManager::MAX_VAULTS);
+
+        // One more should be rejected
+        let overflow = create_test_vault("overflow", false);
+        let result = manager.add_vault(overflow).await;
+        assert!(
+            result.is_err(),
+            "adding the {}th vault should fail",
+            MultiVaultManager::MAX_VAULTS + 1
+        );
     }
 }

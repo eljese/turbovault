@@ -231,6 +231,24 @@ pub struct AnalysisReport {
     pub recommendations: Vec<String>,
 }
 
+/// Escape a value for safe CSV output.
+///
+/// Always wraps in double-quotes and escapes internal double-quotes by doubling
+/// them (RFC 4180). Prefixes formula-triggering characters (`=`, `+`, `-`, `@`)
+/// with a single-quote to prevent DDE/formula injection in spreadsheets.
+fn csv_escape(value: &str) -> String {
+    let safe_value = if value.starts_with('=')
+        || value.starts_with('+')
+        || value.starts_with('-')
+        || value.starts_with('@')
+    {
+        format!("'{}", value)
+    } else {
+        value.to_string()
+    };
+    format!("\"{}\"", safe_value.replace('"', "\"\""))
+}
+
 /// Health report exporter
 pub struct HealthReportExporter;
 
@@ -245,8 +263,8 @@ impl HealthReportExporter {
         let csv = format!(
             "timestamp,vault_name,health_score,total_notes,total_links,broken_links,orphaned_notes,connectivity_rate,link_density,status\n\
              {},{},{},{},{},{},{},{:.3},{:.3},{}",
-            report.timestamp,
-            report.vault_name,
+            csv_escape(&report.timestamp),
+            csv_escape(&report.vault_name),
             report.health_score,
             report.total_notes,
             report.total_links,
@@ -254,7 +272,7 @@ impl HealthReportExporter {
             report.orphaned_notes,
             report.connectivity_rate,
             report.link_density,
-            report.status
+            csv_escape(&report.status)
         );
 
         Ok(csv)
@@ -277,8 +295,11 @@ impl BrokenLinksExporter {
         for link in links {
             let suggestions = link.suggestions.join("|");
             csv.push_str(&format!(
-                "\"{}\",\"{}\",{},\"{}\"\n",
-                link.source_file, link.target, link.line, suggestions
+                "{},{},{},{}\n",
+                csv_escape(&link.source_file),
+                csv_escape(&link.target),
+                link.line,
+                csv_escape(&suggestions)
             ));
         }
 
@@ -300,8 +321,8 @@ impl VaultStatsExporter {
         let csv = format!(
             "timestamp,vault_name,total_files,total_links,orphaned_files,average_links_per_file,total_words,total_readable_chars,avg_words_per_note\n\
              {},{},{},{},{},{:.3},{},{},{:.1}",
-            stats.timestamp,
-            stats.vault_name,
+            csv_escape(&stats.timestamp),
+            csv_escape(&stats.vault_name),
             stats.total_files,
             stats.total_links,
             stats.orphaned_files,
@@ -328,16 +349,16 @@ impl AnalysisReportExporter {
     pub fn to_csv(report: &AnalysisReport) -> Result<String> {
         let csv = format!(
             "timestamp,vault_name,health_score,total_notes,total_links,broken_links,orphaned_notes,broken_links_count,recommendations\n\
-             {},{},{},{},{},{},{},{},\"{}\"",
-            report.timestamp,
-            report.vault_name,
+             {},{},{},{},{},{},{},{},{}",
+            csv_escape(&report.timestamp),
+            csv_escape(&report.vault_name),
             report.health.health_score,
             report.health.total_notes,
             report.health.total_links,
             report.health.broken_links,
             report.health.orphaned_notes,
             report.broken_links_count,
-            report.recommendations.join("|")
+            csv_escape(&report.recommendations.join("|"))
         );
 
         Ok(csv)
@@ -476,5 +497,65 @@ mod tests {
         let csv = VaultStatsExporter::to_csv(&stats).unwrap();
         assert!(csv.contains("100"));
         assert!(csv.contains("25000"));
+    }
+
+    // =========================================================================
+    // csv_escape tests
+    // =========================================================================
+
+    #[test]
+    fn test_csv_escape_plain_text() {
+        assert_eq!(csv_escape("hello world"), "\"hello world\"");
+    }
+
+    #[test]
+    fn test_csv_escape_embedded_quotes() {
+        assert_eq!(csv_escape(r#"say "hi""#), r#""say ""hi""""#);
+    }
+
+    #[test]
+    fn test_csv_escape_formula_equals() {
+        assert_eq!(csv_escape("=SUM(A1:A2)"), "\"'=SUM(A1:A2)\"");
+    }
+
+    #[test]
+    fn test_csv_escape_formula_plus() {
+        assert_eq!(csv_escape("+1234"), "\"'+1234\"");
+    }
+
+    #[test]
+    fn test_csv_escape_formula_minus() {
+        assert_eq!(csv_escape("-1234"), "\"'-1234\"");
+    }
+
+    #[test]
+    fn test_csv_escape_formula_at() {
+        assert_eq!(csv_escape("@SUM"), "\"'@SUM\"");
+    }
+
+    #[test]
+    fn test_csv_escape_empty_string() {
+        assert_eq!(csv_escape(""), "\"\"");
+    }
+
+    #[test]
+    fn test_csv_escape_with_newlines() {
+        // Newlines embedded inside quoted fields are valid per RFC 4180
+        assert_eq!(csv_escape("line1\nline2"), "\"line1\nline2\"");
+    }
+
+    #[test]
+    fn test_csv_escape_with_commas() {
+        assert_eq!(csv_escape("a,b,c"), "\"a,b,c\"");
+    }
+
+    #[test]
+    fn test_csv_escape_combined_injection() {
+        // Formula prefix AND embedded double-quotes
+        // Input:  =cmd|'/C calc'!A1
+        // After formula-prefix:  '=cmd|'/C calc'!A1
+        // After quote-doubling:  no double-quotes present, so unchanged
+        // Wrapped:               "'=cmd|'/C calc'!A1"
+        assert_eq!(csv_escape("=cmd|'/C calc'!A1"), "\"'=cmd|'/C calc'!A1\"");
     }
 }

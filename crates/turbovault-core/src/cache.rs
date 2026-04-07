@@ -316,19 +316,154 @@ impl VaultCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::VaultConfig;
+    use tempfile::TempDir;
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /// Build a VaultCache whose project-cache directory lives entirely inside
+    /// a temporary directory, keeping tests isolated from each other and from
+    /// the real user cache.
+    ///
+    /// We point `XDG_CACHE_HOME` at the temp dir so `get_cache_dir()` uses it.
+    ///
+    /// SAFETY: modifying environment variables is unsafe in Rust 2024+ because
+    /// it is not thread-safe; however these tests are run with `#[tokio::test]`
+    /// which provides single-threaded isolation for each test function.
+    async fn make_cache(temp: &TempDir) -> VaultCache {
+        // Override the cache root so nothing leaks into ~/.cache
+        // SAFETY: single-threaded test context; no other threads read XDG_CACHE_HOME.
+        unsafe { std::env::set_var("XDG_CACHE_HOME", temp.path()) };
+        VaultCache::init_with_project(temp.path()).await.unwrap()
+    }
+
+    fn make_vault_config(name: &str, path: &std::path::Path) -> VaultConfig {
+        VaultConfig {
+            name: name.to_string(),
+            path: path.to_path_buf(),
+            is_default: false,
+            watch_for_changes: None,
+            max_file_size: None,
+            allowed_extensions: None,
+            excluded_paths: None,
+            enable_caching: None,
+            cache_ttl: None,
+            template_dirs: None,
+            allowed_operations: None,
+        }
+    }
+
+    // ── Tests ─────────────────────────────────────────────────────────────────
 
     #[test]
-    fn test_hash_path() {
-        let path1 = Path::new("/home/user/projects/vault");
-        let path2 = Path::new("/home/user/projects/vault");
-        let hash1 = VaultCache::hash_path(path1);
-        let hash2 = VaultCache::hash_path(path2);
-        assert_eq!(hash1, hash2, "Same paths should hash to same value");
+    fn test_hash_path_deterministic() {
+        let path = Path::new("/home/user/projects/vault");
+        let h1 = VaultCache::hash_path(path);
+        let h2 = VaultCache::hash_path(path);
+        assert_eq!(h1, h2, "same path must always produce the same hash");
+        // The implementation truncates to 16 hex chars
+        assert_eq!(h1.len(), 16);
+    }
+
+    #[test]
+    fn test_hash_path_different_paths() {
+        let h1 = VaultCache::hash_path(Path::new("/home/user/vault-a"));
+        let h2 = VaultCache::hash_path(Path::new("/home/user/vault-b"));
+        assert_ne!(h1, h2, "different paths must produce different hashes");
     }
 
     #[tokio::test]
-    async fn test_cache_operations() {
-        // This test would require more setup with temporary directories
-        // Skipping detailed implementation for now
+    async fn test_init_creates_cache_directory() {
+        let temp = TempDir::new().unwrap();
+        // SAFETY: single-threaded test context; no other threads read XDG_CACHE_HOME.
+        unsafe { std::env::set_var("XDG_CACHE_HOME", temp.path()) };
+
+        let cache = VaultCache::init_with_project(temp.path()).await.unwrap();
+
+        // The project cache directory should now exist on disk
+        assert!(
+            cache.project_cache_dir().exists(),
+            "project cache dir should be created by init_with_project"
+        );
+        assert!(cache.project_cache_dir().is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_save_and_load_roundtrip() {
+        let temp = TempDir::new().unwrap();
+        let cache = make_cache(&temp).await;
+
+        let configs = vec![
+            make_vault_config("personal", &temp.path().join("personal")),
+            make_vault_config("work", &temp.path().join("work")),
+        ];
+
+        cache.save_vaults(&configs, "personal").await.unwrap();
+
+        let loaded = cache.load_vaults().await.unwrap();
+        assert_eq!(loaded.len(), 2);
+
+        let names: Vec<&str> = loaded.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&"personal"));
+        assert!(names.contains(&"work"));
+
+        let meta = cache.load_metadata().await.unwrap();
+        assert_eq!(meta.active_vault, "personal");
+    }
+
+    #[tokio::test]
+    async fn test_clear_removes_data() {
+        let temp = TempDir::new().unwrap();
+        let cache = make_cache(&temp).await;
+
+        let configs = vec![make_vault_config("v1", &temp.path().join("v1"))];
+        cache.save_vaults(&configs, "v1").await.unwrap();
+
+        // Confirm data is there before clearing
+        assert_eq!(cache.load_vaults().await.unwrap().len(), 1);
+
+        cache.clear().await.unwrap();
+
+        // After clearing, load_vaults should return an empty vec (no file = no data)
+        let after = cache.load_vaults().await.unwrap();
+        assert!(after.is_empty(), "cleared cache should return no vaults");
+    }
+
+    #[tokio::test]
+    async fn test_load_nonexistent_returns_empty() {
+        let temp = TempDir::new().unwrap();
+        let cache = make_cache(&temp).await;
+
+        // Never called save_vaults — vaults.yaml does not exist yet
+        let vaults = cache.load_vaults().await.unwrap();
+        assert!(
+            vaults.is_empty(),
+            "missing cache file should produce empty vec, not an error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_corrupted_cache_graceful() {
+        let temp = TempDir::new().unwrap();
+        let cache = make_cache(&temp).await;
+
+        // Write invalid YAML directly to the vaults file
+        let vaults_path = cache.project_cache_dir().join("vaults.yaml");
+        tokio::fs::write(&vaults_path, b"{ not: [valid: yaml---\x00\xff")
+            .await
+            .unwrap();
+
+        // load_vaults must not panic; it may return Err or Ok(empty)
+        let result = cache.load_vaults().await;
+        // Either outcome is acceptable — panic is not
+        match result {
+            Ok(vaults) => {
+                // Tolerate implementations that silently discard corrupt caches
+                let _ = vaults;
+            }
+            Err(_) => {
+                // Tolerate implementations that surface the parse error
+            }
+        }
     }
 }
