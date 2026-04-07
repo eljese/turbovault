@@ -1,11 +1,12 @@
 //! Vault manager implementation with file watching and caching
 
+use dashmap::DashMap;
 use path_trav::PathTrav;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::instrument;
 use turbovault_audit::{AuditEntry, AuditLog, OperationType, SnapshotStore};
 use turbovault_core::prelude::*;
@@ -31,6 +32,7 @@ pub struct VaultManager {
     link_graph: Arc<RwLock<LinkGraph>>,
     file_cache: Arc<RwLock<HashMap<PathBuf, CacheEntry>>>,
     locks: Arc<RwLock<HashMap<PathBuf, Lock>>>,
+    write_locks: DashMap<PathBuf, Arc<Mutex<()>>>,
     audit_log: Option<Arc<AuditLog>>,
     snapshot_store: Option<Arc<SnapshotStore>>,
 }
@@ -48,9 +50,19 @@ impl VaultManager {
             link_graph: Arc::new(RwLock::new(LinkGraph::new())),
             file_cache: Arc::new(RwLock::new(HashMap::new())),
             locks: Arc::new(RwLock::new(HashMap::new())),
+            write_locks: DashMap::new(),
             audit_log: None,
             snapshot_store: None,
         })
+    }
+
+    /// Internal helper to get a per-path write lock
+    async fn get_write_lock(&self, path: &Path) -> Arc<Mutex<()>> {
+        self.write_locks
+            .entry(path.to_path_buf())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .value()
+            .clone()
     }
 
     /// Get vault path
@@ -267,12 +279,27 @@ impl VaultManager {
         content: &str,
         expected_hash: Option<&str>,
     ) -> Result<()> {
+        let vault_path = self.resolve_path(path)?;
+        
+        // Take a per-path write lock to ensure atomicity
+        let lock_arc = self.get_write_lock(&vault_path).await;
+        let _lock = lock_arc.lock().await;
+
+        self.write_file_internal(&vault_path, content, expected_hash).await
+    }
+
+    /// Internal write implementation that doesn't take the per-path lock.
+    /// Caller MUST ensure they hold the lock for `vault_path`.
+    async fn write_file_internal(
+        &self,
+        vault_path: &Path,
+        content: &str,
+        expected_hash: Option<&str>,
+    ) -> Result<()> {
         use crate::edit::compute_hash;
 
-        let vault_path = self.resolve_path(path)?;
-
         // Read current content for hash check and audit trail
-        let before_content = tokio::fs::read_to_string(&vault_path).await.ok();
+        let before_content = tokio::fs::read_to_string(vault_path).await.ok();
         let file_existed = before_content.is_some();
 
         // Optimistic concurrency check
@@ -354,11 +381,11 @@ impl VaultManager {
 
         // Invalidate file cache
         let mut cache = self.file_cache.write().await;
-        cache.remove(&vault_path);
+        cache.remove(vault_path);
         drop(cache); // Release write lock before parsing
 
         // Parse file and update graph
-        match self.parser.parse_file(&vault_path, content) {
+        match self.parser.parse_file(vault_path, content) {
             Ok(vault_file) => {
                 log::debug!(
                     "Parsed {}: {} links extracted",
@@ -410,8 +437,9 @@ impl VaultManager {
 
         let vault_path = self.resolve_path(path)?;
 
-        // Acquire write lock on file cache to prevent TOCTOU
-        let _cache_guard = self.file_cache.write().await;
+        // Take a per-path write lock to ensure atomicity
+        let lock_arc = self.get_write_lock(&vault_path).await;
+        let _lock = lock_arc.lock().await;
 
         // Read current content
         let current_content = tokio::fs::read_to_string(&vault_path)
@@ -445,11 +473,8 @@ impl VaultManager {
         // Apply edits to get new content
         let (new_content, _warnings) = engine.apply_blocks(&current_content, &blocks)?;
 
-        // Release cache guard before write (avoid deadlock)
-        drop(_cache_guard);
-
         // Write atomically (hash already validated above, pass None)
-        self.write_file(&vault_path, &new_content, None).await?;
+        self.write_file_internal(&vault_path, &new_content, None).await?;
 
         Ok(edit_result)
     }
@@ -460,6 +485,10 @@ impl VaultManager {
         use crate::edit::compute_hash;
 
         let vault_path = self.resolve_path(path)?;
+
+        // Take a per-path write lock to ensure atomicity
+        let lock_arc = self.get_write_lock(&vault_path).await;
+        let _lock = lock_arc.lock().await;
 
         // Read content for hash check and audit trail
         let before_content = tokio::fs::read_to_string(&vault_path).await.ok();
@@ -532,6 +561,25 @@ impl VaultManager {
 
         let from_path = self.resolve_path(from)?;
         let to_path = self.resolve_path(to)?;
+
+        // Acquire locks for both paths to ensure atomicity.
+        // Lock in alphabetical order to avoid circular deadlocks between concurrent moves.
+        let first_path = if from_path <= to_path { &from_path } else { &to_path };
+        let second_path = if from_path <= to_path { &to_path } else { &from_path };
+
+        let lock1_arc = self.get_write_lock(first_path).await;
+        let _lock1 = lock1_arc.lock().await;
+
+        let lock2_arc = if first_path != second_path {
+            Some(self.get_write_lock(second_path).await)
+        } else {
+            None
+        };
+        let _lock2 = if let Some(ref arc) = lock2_arc {
+            Some(arc.lock().await)
+        } else {
+            None
+        };
 
         // Read content before move for graph update, audit, and hash check
         let content = tokio::fs::read_to_string(&from_path)

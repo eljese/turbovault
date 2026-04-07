@@ -1,67 +1,69 @@
 # API Reference
 
-Complete reference for all 44 MCP tools available to AI agents.
+Complete reference for all 58 MCP tools available to AI agents.
 
 ## Tool Categories
 
-### File Operations (6 tools)
-- `read_note` - Read note content
-- `write_note` - Write/create note
+### File Operations (7 tools)
+- `read_full_note` - Read note content with hash
+- `write_note` - Write/create note (atomic)
+- `edit_note` - Targeted edits (SEARCH/REPLACE)
 - `delete_note` - Delete note
 - `move_note` - Move/rename note
-- `copy_note` - Copy note
-- `list_files` - List vault files
+- `move_file` - Move attachments
+- `get_notes_info` - Batch metadata
 
-### Search & Discovery (5 tools)
-- `search` - Full-text search
+### Search & Discovery (6 tools)
+- `search_vault_summaries` - Fast discovery search
 - `advanced_search` - Search with filters
-- `search_by_tags` - Search by tags
-- `find_related` - Find similar notes
+- `semantic_search` - Conceptual similarity (TF-IDF)
+- `find_similar_notes` - Content similarity
 - `recommend_related` - Get recommendations
+- `query_metadata` - Query frontmatter
 
-### Link Analysis (4 tools)
-- `get_backlinks` - Find notes linking to this note
-- `get_forward_links` - Find notes this note links to
-- `find_related_notes` - Find notes within N hops
-- `search_files` - Filename search
-
-### Graph Analysis (7 tools)
-- `quick_health_check` - Fast health metrics
-- `full_health_analysis` - Comprehensive health report
-- `get_broken_links` - Find broken links with suggestions
+### Link & Graph Analysis (9 tools)
+- `get_backlinks` - Find incoming links
+- `get_forward_links` - Find outgoing links
+- `get_related_notes` - Find notes within N hops
 - `get_hub_notes` - Find highly connected notes
-- `get_dead_end_notes` - Find notes with no outgoing links
+- `get_dead_end_notes` - Find leaf notes
+- `get_isolated_clusters` - Find isolated groups
+- `get_link_strength` - Calculate connection weight
+- `suggest_links` - AI-powered link suggestions
+- `get_centrality_ranking` - Advanced centrality metrics
+
+### Health & Validation (5 tools)
+- `quick_health_check` - Fast health score
+- `full_health_analysis` - Comprehensive report
+- `get_broken_links` - Find broken links
 - `detect_cycles` - Find circular references
-- `get_connected_components` - Find isolated clusters
+- `explain_vault` - Holistic vault summary
 
 ### Template System (4 tools)
 - `list_templates` - List available templates
 - `get_template` - Get template details
 - `create_from_template` - Create note from template
-- `find_notes_from_template` - Find notes created from template
+- `find_notes_from_template` - Find notes from template
 
 ### Batch Operations (1 tool)
-- `batch_execute` - Execute multiple operations atomically
+- `batch_execute` - Atomic multi-operation transactions
 
 ### Export & Reporting (4 tools)
 - `export_health_report` - Export health metrics
 - `export_broken_links` - Export broken links
 - `export_vault_stats` - Export vault statistics
-- `export_analysis_report` - Export comprehensive analysis
+- `export_analysis_report` - Export holistic analysis
 
-### Validation (3 tools)
-- `validate_note` - Validate single note
-- `validate_note_with_rules` - Validate with custom rules
-- `validate_vault` - Validate entire vault
+### Comparison & Diff (4 tools)
+- `diff_notes` - Side-by-side comparison
+- `diff_note_version` - Compare with audit version
+- `compare_notes` - Similarity and merge analysis
+- `find_duplicates` - Duplicate detection (SimHash)
 
-### Metadata Queries (2 tools)
-- `query_metadata` - Query frontmatter
-- `get_metadata_value` - Get specific metadata value
-
-### Relationship Analysis (3 tools)
-- `get_link_strength` - Calculate link strength between notes
-- `suggest_links` - Get link suggestions
-- `get_centrality_ranking` - Get importance rankings
+### Quality Analysis (3 tools)
+- `evaluate_note_quality` - Individual note quality
+- `vault_quality_report` - Aggregate quality report
+- `find_stale_notes` - Neglected content detection
 
 ### Vault Lifecycle (7 tools)
 - `create_vault` - Create new vault
@@ -69,115 +71,73 @@ Complete reference for all 44 MCP tools available to AI agents.
 - `list_vaults` - List all vaults
 - `get_active_vault` - Get current vault
 - `set_active_vault` - Switch vault
-- `remove_vault` - Remove vault
-- `validate_vault` - Validate vault structure
+- `remove_vault` - Unregister vault
+- `get_vault_config` - View configuration
+
+### Utility & Knowledge (4 tools)
+- `get_metadata_value` - Property extraction
+- `update_frontmatter` - Property updates
+- `resolve_cross_vault_link` - Multi-vault links
+- `get_ofm_syntax_guide` - OFM Reference
 
 ## Example Workflows
 
-### Search and Summarize
+### Semantic Discovery
 ```python
-# Search for notes about a topic
-results = search("rust async programming")
+# Find notes conceptually related to a topic
+results = semantic_search("distributed systems architecture")
 
-# Read the top results
-for result in results[:3]:
-    content = read_note(result.path)
-    # Process content...
+# Find similar notes to a specific finding
+similar = find_similar_notes(results[0].path)
 ```
 
-### Vault Health Analysis
+### Quality Audit
 ```python
-# Quick health check
-health = quick_health_check()
+# Generate vault quality report
+report = vault_quality_report(bottom_n=10)
 
-if health.health_score < 70:
-    # Detailed analysis
-    broken = get_broken_links()
-    orphans = get_dead_end_notes()
-    # Generate recommendations...
+# Evaluate specific note and get recommendations
+quality = evaluate_note_quality(report.lowest_quality[0].path)
 ```
 
-### Create Structured Notes
+### Multi-Vault Navigation
 ```python
-# List available templates
-templates = list_templates()
+# Encountered a cross-vault link in content
+uri = "obsidian://vault/Secondary/Project/Plan"
+target = resolve_cross_vault_link(uri)
 
-# Create note from template
-created = create_from_template(
-    template_id="task",
-    path="tasks/user-auth.md",
-    fields={
-        "title": "User Authentication",
-        "priority": "high"
-    }
-)
-```
-
-### Bulk Organization
-```python
-# Find completed projects
-completed = query_metadata('status: "completed"')
-
-# Build batch operations
-operations = []
-for project in completed:
-    operations.append({
-        "type": "move_file",
-        "from": project.path,
-        "to": f"archive/{project.path}"
-    })
-
-# Execute atomically
-result = batch_execute(operations)
+# Switch context and read
+set_active_vault(target.target_vault)
+content = read_full_note(target.target_file)
 ```
 
 ## Data Types
 
-### SearchResultInfo
+### QualityScore
 ```rust
 {
-    path: String,              // Relative to vault root
-    title: String,             // From frontmatter or first heading
-    preview: String,           // First 200 chars
-    score: f64,                // Relevance (0.0-1.0)
-    snippet: String,           // Match context with highlighting
-    tags: Vec<String>,         // Frontmatter tags
-    outgoing_links: Vec<String>, // Files this note links to
-    backlink_count: usize,     // How many notes link here
+    path: String,
+    overall_score: u8,         // 0-100
+    readability: ReadabilityScore,
+    structure: StructureScore,
+    completeness: CompletenessScore,
+    staleness: StalenessScore,
+    recommendations: Vec<String>,
 }
 ```
 
-### HealthInfo
+### DiffResult
 ```rust
 {
-    health_score: u8,          // 0-100 health score
-    total_notes: usize,        // Total notes in vault
-    broken_links_count: usize, // Number of broken links
-    is_healthy: bool,          // Overall health status
+    left_path: String,
+    right_path: String,
+    unified_diff: String,      // Standard diff format
+    summary: {
+        lines_added: usize,
+        lines_removed: usize,
+        similarity_ratio: f64, // 0.0-1.0
+    }
 }
 ```
 
-### BatchResult
-```rust
-{
-    success: bool,             // All operations succeeded
-    executed: usize,           // Number of operations completed
-    total: usize,              // Total operations in batch
-    transaction_id: String,    // Unique transaction ID
-    duration_ms: u64,          // Execution time
-    changes: Vec<String>,     // Successful changes
-    errors: Vec<String>,       // Error messages
-}
-```
-
-## Error Handling
-
-All tools return structured errors with context:
-
-- `NotFound` - File or resource not found
-- `InvalidPath` - Path validation failure
-- `PathTraversalAttempt` - Security violation
-- `ValidationError` - Content validation failure
-- `ConfigError` - Configuration issue
-
-Error messages include suggestions for recovery when possible.
+See the full [MCP Tools Reference](./tools.md) for parameter details.

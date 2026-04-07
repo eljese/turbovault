@@ -71,6 +71,42 @@ impl DiffTools {
         ))
     }
 
+    /// Compare current note with a version from audit trail
+    pub async fn diff_note_version(&self, path: &str, operation_id: &str) -> Result<DiffResult> {
+        let audit_log = self.manager.audit_log().ok_or_else(|| {
+            Error::other("Audit log not configured for this vault")
+        })?;
+        let snapshot_store = self.manager.snapshot_store().ok_or_else(|| {
+            Error::other("Snapshot store not configured for this vault")
+        })?;
+
+        let entry = audit_log.get_entry(operation_id).await?.ok_or_else(|| {
+            Error::other(format!("Audit entry not found: {}", operation_id))
+        })?;
+
+        let snapshot_id = entry
+            .before_snapshot_id
+            .as_ref()
+            .or(entry.after_snapshot_id.as_ref())
+            .ok_or_else(|| {
+                Error::other("No snapshot available for this operation")
+            })?;
+
+        let snapshot_content = snapshot_store.retrieve(snapshot_id).await?;
+        let current_content = self.manager.read_file(&PathBuf::from(path)).await?;
+
+        Ok(Self::diff_content(
+            &snapshot_content,
+            &current_content,
+            &format!(
+                "{} (version {})",
+                path,
+                &operation_id[..8.min(operation_id.len())]
+            ),
+            &format!("{} (current)", path),
+        ))
+    }
+
     /// Compare two content strings directly (reusable by audit trail)
     pub fn diff_content(
         left: &str,

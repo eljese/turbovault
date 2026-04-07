@@ -280,6 +280,81 @@ impl RelationshipTools {
             "rankings": ranked
         }))
     }
+
+    /// Find "God Nodes" and provide a curated topological analysis report
+    pub async fn find_vault_god_nodes(&self) -> Result<Value> {
+        let graph = self.manager.link_graph();
+        let read = graph.read().await;
+        
+        let all_files = read.all_files();
+        let total_files = all_files.len();
+        
+        if total_files == 0 {
+            return Ok(json!({
+                "summary": "Vault is empty",
+                "god_nodes": [],
+                "bridges": [],
+                "authorities": []
+            }));
+        }
+
+        // Get the full ranking data
+        let ranking_val = self.get_centrality_ranking().await?;
+        let rankings = ranking_val["rankings"].as_array().unwrap();
+
+        // 1. God Nodes (Top by Score/Degree)
+        let god_nodes: Vec<_> = rankings.iter().take(10).map(|r| {
+            json!({
+                "file": r["file"],
+                "connections": (r["betweenness"].as_f64().unwrap_or(0.0) * 10.0).round() as usize,
+                "score": r["score"]
+            })
+        }).collect();
+
+        // 2. Bridge Notes (Top by Betweenness)
+        let mut by_betweenness = rankings.clone();
+        by_betweenness.sort_by(|a, b| {
+            b["betweenness"].as_f64().unwrap().partial_cmp(&a["betweenness"].as_f64().unwrap()).unwrap()
+        });
+        let bridges: Vec<_> = by_betweenness.iter().take(5).map(|r| {
+            json!({
+                "file": r["file"],
+                "betweenness": r["betweenness"]
+            })
+        }).collect();
+
+        // 3. Authorities (Top by Eigenvector/Backlinks)
+        let mut by_eigen = rankings.clone();
+        by_eigen.sort_by(|a, b| {
+            b["eigenvector"].as_f64().unwrap().partial_cmp(&a["eigenvector"].as_f64().unwrap()).unwrap()
+        });
+        let authorities: Vec<_> = by_eigen.iter().take(5).map(|r| {
+            json!({
+                "file": r["file"],
+                "eigenvector": r["eigenvector"]
+            })
+        }).collect();
+
+        // 4. Calculate Density
+        let total_links = read.all_links().len();
+        let density = if total_files > 1 {
+            total_links as f64 / (total_files * (total_files - 1)) as f64
+        } else {
+            0.0
+        };
+
+        Ok(json!({
+            "summary": {
+                "total_files": total_files,
+                "total_links": total_links,
+                "graph_density": density,
+                "verdict": if density > 0.05 { "Highly Interconnected" } else if density > 0.01 { "Healthy Connectivity" } else { "Fragmented" }
+            },
+            "god_nodes": god_nodes,
+            "bridges": bridges,
+            "authorities": authorities
+        }))
+    }
 }
 
 /// Interpret link strength as human-readable text

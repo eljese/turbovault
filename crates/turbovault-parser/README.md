@@ -153,7 +153,7 @@ let content = r#"
 // - content: "Write documentation"
 // - is_completed: false
 // - position: SourcePosition
-// - due_date: None (TODO)
+// - due_date: Some("2026-04-01") (if present)
 ```
 
 **Features:**
@@ -184,7 +184,7 @@ let content = r#"
 - Type detection (maps to `CalloutType` enum)
 - Optional title extraction
 - Foldable callouts: `[!TYPE]+` (expanded) or `[!TYPE]-` (collapsed)
-- Note: Multi-line content parsing is TODO
+- Multi-line content extraction with quote marker awareness
 
 ### Heading Parser (`parsers/headings.rs`)
 

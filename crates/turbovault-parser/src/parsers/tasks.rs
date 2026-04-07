@@ -11,6 +11,10 @@ use turbovault_core::{LineIndex, SourcePosition, TaskItem};
 static TASK_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\s*)- \[([ xX])\]\s+(.+)$").unwrap());
 
+/// Task due date: 📅 YYYY-MM-DD
+static DUE_DATE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"📅\s*(\d{4}-\d{2}-\d{2})").unwrap());
+
 /// Fast pre-filter: skip regex if no task pattern exists.
 #[inline]
 fn has_task(content: &str) -> bool {
@@ -40,6 +44,10 @@ pub fn parse_tasks(content: &str) -> Vec<TaskItem> {
                 let task_content = caps.get(3).unwrap().as_str();
                 let full_match = caps.get(0).unwrap();
 
+                let due_date = DUE_DATE_RE
+                    .captures(task_content)
+                    .map(|c| c.get(1).unwrap().as_str().to_string());
+
                 TaskItem {
                     content: task_content.to_string(),
                     is_completed,
@@ -49,7 +57,7 @@ pub fn parse_tasks(content: &str) -> Vec<TaskItem> {
                         line_start + indent.len(),
                         full_match.len() - indent.len(),
                     ),
-                    due_date: None,
+                    due_date,
                 }
             })
         })
@@ -139,6 +147,14 @@ mod tests {
         let content = "No tasks here, just plain text without the checkbox pattern.";
         let tasks = parse_tasks(content);
         assert_eq!(tasks.len(), 0);
+    }
+
+    #[test]
+    fn test_task_with_due_date() {
+        let content = "- [ ] Task with due date 📅 2026-04-01";
+        let tasks = parse_tasks(content);
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].due_date, Some("2026-04-01".to_string()));
     }
 
     #[test]

@@ -44,6 +44,10 @@ static CALLOUT: LazyLock<Regex> =
 /// Callout continuation: > content
 static CALLOUT_CONT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*>\s*(.*)$").unwrap());
 
+/// Task due date: 📅 YYYY-MM-DD
+static DUE_DATE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"📅\s*(\d{4}-\d{2}-\d{2})").unwrap());
+
 // ============================================================================
 // Fast pre-filters (skip regex if pattern not present)
 // ============================================================================
@@ -371,15 +375,20 @@ impl<'a> ParseEngine<'a> {
                 Event::End(TagEnd::Item) if in_task_item => {
                     in_task_item = false;
                     if !task_content.is_empty() {
+                        let content = task_content.trim().to_string();
+                        let due_date = DUE_DATE_RE
+                            .captures(&content)
+                            .map(|caps| caps.get(1).unwrap().as_str().to_string());
+
                         result.tasks.push(TaskItem {
-                            content: task_content.trim().to_string(),
+                            content,
                             is_completed: task_checked,
                             position: SourcePosition::from_offset_indexed(
                                 &self.index,
                                 task_start,
                                 range.end - task_start,
                             ),
-                            due_date: None,
+                            due_date,
                         });
                     }
                     task_content.clear();
@@ -741,7 +750,7 @@ impl<'a> ParseEngine<'a> {
         offset: &mut usize,
     ) -> Callout {
         let start_line_idx = *i;
-        let first_line = lines[start_line_idx];
+        let _first_line = lines[start_line_idx];
         let type_str = caps.get(1).unwrap().as_str();
         let fold_marker = caps.get(2).unwrap().as_str();
         let title_text = caps.get(3).unwrap().as_str();
@@ -791,7 +800,7 @@ impl<'a> ParseEngine<'a> {
             position: SourcePosition::from_offset_indexed(
                 &self.index,
                 global_line_start,
-                first_line.len(),
+                (body_offset + *offset).saturating_sub(global_line_start),
             ),
             is_foldable: !fold_marker.is_empty(),
         }
@@ -914,6 +923,37 @@ mod tests {
         assert_eq!(result.tasks[0].content, "Todo task");
         assert!(result.tasks[1].is_completed);
         assert_eq!(result.tasks[1].content, "Done task");
+    }
+
+    #[test]
+    fn test_engine_tasks_with_due_date() {
+        let content = "- [ ] Task 1 📅 2026-04-01\n- [x] Task 2 (no date)";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all());
+
+        assert_eq!(result.tasks.len(), 2);
+        assert_eq!(result.tasks[0].due_date, Some("2026-04-01".to_string()));
+        assert_eq!(result.tasks[1].due_date, None);
+    }
+
+    #[test]
+    fn test_engine_callout_full_position() {
+        let content = "Text\n> [!NOTE] Title\n> Line 1\n> Line 2\nMore text";
+        let engine = ParseEngine::new(content);
+        let result = engine.parse(&ParseOptions::all().with_full_callouts());
+
+        assert_eq!(result.callouts.len(), 1);
+        let callout = &result.callouts[0];
+        assert_eq!(callout.content, "Line 1\nLine 2");
+        assert_eq!(callout.position.line, 2);
+        // Total length should include "> [!NOTE] Title\n" + "> Line 1\n" + "> Line 2\n"
+        // Line 1: "Text\n" (offset 5)
+        // Line 2: "> [!NOTE] Title\n" (len 16)
+        // Line 3: "> Line 1\n" (len 9)
+        // Line 4: "> Line 2\n" (len 9)
+        // Total range should be from offset 5 to 5+16+9+9 = 39.
+        assert_eq!(callout.position.offset, 5);
+        assert_eq!(callout.position.length, 34); // 16 + 9 + 9 = 34
     }
 
     #[test]

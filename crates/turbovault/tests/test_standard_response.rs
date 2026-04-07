@@ -9,6 +9,8 @@ pub struct StandardResponse<T: serde::Serialize> {
     pub data: T,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
     pub took_ms: u64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
@@ -26,6 +28,7 @@ impl<T: serde::Serialize> StandardResponse<T> {
             success: true,
             data,
             count: None,
+            summary: None,
             took_ms: 0,
             warnings: vec![],
             next_steps: vec![],
@@ -35,6 +38,11 @@ impl<T: serde::Serialize> StandardResponse<T> {
 
     pub fn with_count(mut self, count: usize) -> Self {
         self.count = Some(count);
+        self
+    }
+
+    pub fn with_summary(mut self, summary: impl Into<String>) -> Self {
+        self.summary = Some(summary.into());
         self
     }
 
@@ -90,6 +98,19 @@ fn test_standard_response_count_only_if_set() {
         .with_count(5)
         .to_json();
     assert_eq!(response2["count"], 5);
+}
+
+#[test]
+fn test_standard_response_summary_only_if_set() {
+    // Without summary
+    let response1 = StandardResponse::new("vault", "op", json!({})).to_json();
+    assert!(response1["summary"].is_null());
+
+    // With summary
+    let response2 = StandardResponse::new("vault", "op", json!({}))
+        .with_summary("Operations successful")
+        .to_json();
+    assert_eq!(response2["summary"], "Operations successful");
 }
 
 #[test]

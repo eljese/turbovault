@@ -111,6 +111,7 @@ pub struct ErrorResponse {
     pub cause: String,
 
     /// Recovery strategies ranked by success probability
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub recovery_options: Vec<RecoveryOption>,
 
     /// Similar errors that might be relevant
