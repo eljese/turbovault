@@ -297,7 +297,11 @@ impl LinkGraph {
     fn resolve_link(&self, target: &str) -> Option<NodeIndex> {
         // Strip anchors/aliases if present
         let clean_target = target.split('|').next().unwrap_or(target);
-        let clean_target = clean_target.split('#').next().unwrap_or(clean_target).trim();
+        let clean_target = clean_target
+            .split('#')
+            .next()
+            .unwrap_or(clean_target)
+            .trim();
 
         if clean_target.is_empty() {
             return None;
