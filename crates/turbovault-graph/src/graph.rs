@@ -324,17 +324,13 @@ impl LinkGraph {
         }
 
         // Strategy 2: File name (stem) match (O(1) via file_index)
-        if let Some(indices) = self.file_index.get(&target_lower) {
-            if !indices.is_empty() {
-                return Some(indices[0]);
-            }
+        if let Some(idx) = self.file_index.get(&target_lower).and_then(|v| v.first()) {
+            return Some(*idx);
         }
 
         // Strategy 3: Alias match (O(1) via alias_index)
-        if let Some(indices) = self.alias_index.get(&target_lower) {
-            if !indices.is_empty() {
-                return Some(indices[0]);
-            }
+        if let Some(idx) = self.alias_index.get(&target_lower).and_then(|v| v.first()) {
+            return Some(*idx);
         }
 
         // Strategy 4: Path suffix match (O(1) via path_suffix_index)
