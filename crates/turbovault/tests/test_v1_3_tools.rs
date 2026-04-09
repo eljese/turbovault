@@ -225,8 +225,10 @@ async fn test_diff_note_version() {
         .unwrap();
 
     // 3. Get the operation ID from the audit log
-    let mut filter = AuditFilter::default();
-    filter.limit = 10;
+    let filter = AuditFilter {
+        limit: 10,
+        ..Default::default()
+    };
     let entries = audit_log.query(&filter).await.unwrap();
     assert!(entries.len() >= 2);
     // The newest entry [0] should be the update operation
