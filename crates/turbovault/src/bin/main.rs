@@ -4,6 +4,7 @@ use clap::Parser;
 use std::path::PathBuf;
 use turbomcp::telemetry::TelemetryConfig;
 use turbomcp::{McpServerExt, ProtocolConfig};
+use turbomcp_core::types::core::ProtocolVersion;
 use turbovault::ObsidianMcpServer;
 use turbovault_core::VaultConfig;
 use turbovault_core::cache::VaultCache;
@@ -297,7 +298,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Running in STDIO mode for MCP protocol");
             server
                 .builder()
-                .with_protocol(ProtocolConfig::multi_version())
+                .with_protocol({ let mut p = ProtocolConfig::multi_version(); p.supported_versions.push(ProtocolVersion::from("2024-11-05")); p })
                 .serve()
                 .await?;
         }
@@ -308,7 +309,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Output format: {:?}", output_format);
             server
                 .builder()
-                .with_protocol(ProtocolConfig::multi_version())
+                .with_protocol({ let mut p = ProtocolConfig::multi_version(); p.supported_versions.push(ProtocolVersion::from("2024-11-05")); p })
                 .transport(turbomcp::Transport::http(&addr))
                 .serve()
                 .await?;
@@ -320,7 +321,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Output format: {:?}", output_format);
             server
                 .builder()
-                .with_protocol(ProtocolConfig::multi_version())
+                .with_protocol({ let mut p = ProtocolConfig::multi_version(); p.supported_versions.push(ProtocolVersion::from("2024-11-05")); p })
                 .transport(turbomcp::Transport::websocket(&addr))
                 .serve()
                 .await?;
@@ -332,7 +333,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Output format: {:?}", output_format);
             server
                 .builder()
-                .with_protocol(ProtocolConfig::multi_version())
+                .with_protocol({ let mut p = ProtocolConfig::multi_version(); p.supported_versions.push(ProtocolVersion::from("2024-11-05")); p })
                 .transport(turbomcp::Transport::tcp(&addr))
                 .serve()
                 .await?;
@@ -344,7 +345,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::info!("Output format: {:?}", output_format);
             server
                 .builder()
-                .with_protocol(ProtocolConfig::multi_version())
+                .with_protocol({ let mut p = ProtocolConfig::multi_version(); p.supported_versions.push(ProtocolVersion::from("2024-11-05")); p })
                 .transport(turbomcp::Transport::unix(&socket_path))
                 .serve()
                 .await?;

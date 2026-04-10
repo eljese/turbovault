@@ -823,13 +823,13 @@ impl ObsidianMcpServer {
     }
 
     /// Find dead-end notes (incoming but no outgoing)
-    #[tool(
-        description = "Find notes with incoming links but NO outgoing links (knowledge dead-ends). Returns list of paths with backlink counts. Dead-ends may indicate incomplete notes, missing connections, or final destination topics.",
-        usage = "Identify incomplete notes needing expansion, discover topics lacking context, prioritize linking work",
-        performance = "<100ms typical, graph traversal O(N)",
-        related = ["suggest_links", "get_hub_notes", "get_isolated_clusters"],
-        examples = []
-    )]
+//     #[tool(
+//         description = "Find notes with incoming links but NO outgoing links (knowledge dead-ends). Returns list of paths with backlink counts. Dead-ends may indicate incomplete notes, missing connections, or final destination topics.",
+//         usage = "Identify incomplete notes needing expansion, discover topics lacking context, prioritize linking work",
+//         performance = "<100ms typical, graph traversal O(N)",
+//         related = ["suggest_links", "get_hub_notes", "get_isolated_clusters"],
+//         examples = []
+//     )]
     async fn get_dead_end_notes(&self) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = GraphTools::new(manager);
@@ -847,13 +847,13 @@ impl ObsidianMcpServer {
     }
 
     /// Find isolated clusters in vault
-    #[tool(
-        description = "Find disconnected groups of notes (subgraphs with no connections to main graph). Returns clusters as arrays of paths. Isolated clusters may represent separate projects, orphaned content, or incomplete knowledge areas.",
-        usage = "Improve vault connectivity, discover orphaned content, validate vault structure",
-        performance = "<200ms typical, uses union-find algorithm O(N)",
-        related = ["suggest_links", "get_dead_end_notes", "full_health_analysis"],
-        examples = []
-    )]
+//     #[tool(
+//         description = "Find disconnected groups of notes (subgraphs with no connections to main graph). Returns clusters as arrays of paths. Isolated clusters may represent separate projects, orphaned content, or incomplete knowledge areas.",
+//         usage = "Improve vault connectivity, discover orphaned content, validate vault structure",
+//         performance = "<200ms typical, uses union-find algorithm O(N)",
+//         related = ["suggest_links", "get_dead_end_notes", "full_health_analysis"],
+//         examples = []
+//     )]
     async fn get_isolated_clusters(&self) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = GraphTools::new(manager);
@@ -963,13 +963,13 @@ impl ObsidianMcpServer {
     }
 
     /// Detect cycles in link graph
-    #[tool(
-        description = "Detect circular reference chains in the link graph returning all cycles as arrays of paths",
-        usage = "Use for graph topology analysis. Cycles aren't necessarily bad (many knowledge domains are naturally circular) but may indicate redundant structure or need for hub notes",
-        performance = "Moderate - performs graph traversal to detect cycles, scales with vault complexity and link density",
-        related = ["get_hub_notes", "full_health_analysis", "get_related_notes"],
-        examples = ["find circular links", "detect reference cycles", "A→B→C→A patterns"]
-    )]
+//     #[tool(
+//         description = "Detect circular reference chains in the link graph returning all cycles as arrays of paths",
+//         usage = "Use for graph topology analysis. Cycles aren't necessarily bad (many knowledge domains are naturally circular) but may indicate redundant structure or need for hub notes",
+//         performance = "Moderate - performs graph traversal to detect cycles, scales with vault complexity and link density",
+//         related = ["get_hub_notes", "full_health_analysis", "get_related_notes"],
+//         examples = ["find circular links", "detect reference cycles", "A→B→C→A patterns"]
+//     )]
     async fn detect_cycles(&self) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = GraphTools::new(manager);
@@ -1111,14 +1111,14 @@ impl ObsidianMcpServer {
 
     /// Search vault by keyword
     /// Search for vault summaries
-    #[tool(
-        name = "search_vault_summaries",
-        description = "Searches the Obsidian vault for relevant context. Returns ONLY a lightweight array containing the 'file_path', 'tags', and a brief 200-character 'summary' of the matching notes. Use this to locate information without loading full files.",
-        usage = "Default tool for 95% of vault interactions. Use to find relevant notes before deciding if read_full_note is needed.",
-        performance = "<100ms typical. Optimized for minimal token usage.",
-        related = ["read_full_note", "advanced_search", "query_metadata"],
-        examples = ["search_term: 'deployment', max_results: 5"]
-    )]
+//     #[tool(
+//         name = "search_vault_summaries",
+//         description = "Searches the Obsidian vault for relevant context. Returns ONLY a lightweight array containing the 'file_path', 'tags', and a brief 200-character 'summary' of the matching notes. Use this to locate information without loading full files.",
+//         usage = "Default tool for 95% of vault interactions. Use to find relevant notes before deciding if read_full_note is needed.",
+//         performance = "<100ms typical. Optimized for minimal token usage.",
+//         related = ["read_full_note", "advanced_search", "query_metadata"],
+//         examples = ["search_term: 'deployment', max_results: 5"]
+//     )]
     async fn search_vault_summaries(
         &self,
         search_term: String,
@@ -1198,13 +1198,13 @@ impl ObsidianMcpServer {
     }
 
     /// Find related notes (recommendations engine)
-    #[tool(
-        description = "ML-powered note recommendations based on content similarity and link proximity with similarity scores and reasoning",
-        usage = "Ideal for discovering non-obvious connections and suggesting reading paths. More sophisticated than get_related_notes which uses only graph structure",
-        performance = "Slow - uses TF-IDF + graph features requiring content analysis and ML computations, may take seconds on large vaults",
-        related = ["get_related_notes", "suggest_links", "search"],
-        examples = ["recommend notes related to 'Machine Learning'", "find similar notes", "what should I read next?"]
-    )]
+//     #[tool(
+//         description = "ML-powered note recommendations based on content similarity and link proximity with similarity scores and reasoning",
+//         usage = "Ideal for discovering non-obvious connections and suggesting reading paths. More sophisticated than get_related_notes which uses only graph structure",
+//         performance = "Slow - uses TF-IDF + graph features requiring content analysis and ML computations, may take seconds on large vaults",
+//         related = ["get_related_notes", "suggest_links", "search"],
+//         examples = ["recommend notes related to 'Machine Learning'", "find similar notes", "what should I read next?"]
+//     )]
     async fn recommend_related(&self, path: String) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let engine = self.get_search_engine(&vault_name, &manager).await?;
@@ -1648,13 +1648,13 @@ impl ObsidianMcpServer {
     // ==================== Export Operations ====================
 
     /// Export health report as JSON or CSV
-    #[tool(
-        description = "Export vault health analysis as structured data",
-        usage = "Use for external analysis, reporting, or archiving health metrics over time",
-        performance = "Fast, <100ms typical",
-        related = ["full_health_analysis", "export_analysis_report", "quick_health_check"],
-        examples = ["format: json", "format: csv"]
-    )]
+//     #[tool(
+//         description = "Export vault health analysis as structured data",
+//         usage = "Use for external analysis, reporting, or archiving health metrics over time",
+//         performance = "Fast, <100ms typical",
+//         related = ["full_health_analysis", "export_analysis_report", "quick_health_check"],
+//         examples = ["format: json", "format: csv"]
+//     )]
     async fn export_health_report(&self, format: String) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = ExportTools::new(manager);
@@ -1674,13 +1674,13 @@ impl ObsidianMcpServer {
     }
 
     /// Export broken links as JSON or CSV
-    #[tool(
-        description = "Export broken links report as structured data",
-        usage = "Use for bulk link fixing workflows or external tooling integration",
-        performance = "Fast, <100ms typical",
-        related = ["get_broken_links", "export_health_report", "full_health_analysis"],
-        examples = ["format: json", "format: csv"]
-    )]
+//     #[tool(
+//         description = "Export broken links report as structured data",
+//         usage = "Use for bulk link fixing workflows or external tooling integration",
+//         performance = "Fast, <100ms typical",
+//         related = ["get_broken_links", "export_health_report", "full_health_analysis"],
+//         examples = ["format: json", "format: csv"]
+//     )]
     async fn export_broken_links(&self, format: String) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = ExportTools::new(manager);
@@ -1700,13 +1700,13 @@ impl ObsidianMcpServer {
     }
 
     /// Export vault statistics as JSON or CSV
-    #[tool(
-        description = "Export comprehensive vault statistics as structured data",
-        usage = "Use for analytics dashboards, vault growth tracking, or external reporting",
-        performance = "Fast, <100ms typical",
-        related = ["quick_health_check", "export_analysis_report", "explain_vault"],
-        examples = ["format: json", "format: csv"]
-    )]
+//     #[tool(
+//         description = "Export comprehensive vault statistics as structured data",
+//         usage = "Use for analytics dashboards, vault growth tracking, or external reporting",
+//         performance = "Fast, <100ms typical",
+//         related = ["quick_health_check", "export_analysis_report", "explain_vault"],
+//         examples = ["format: json", "format: csv"]
+//     )]
     async fn export_vault_stats(&self, format: String) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = ExportTools::new(manager);
@@ -1726,13 +1726,13 @@ impl ObsidianMcpServer {
     }
 
     /// Export full analysis report
-    #[tool(
-        description = "Export comprehensive vault analysis combining health, stats, links, and clusters",
-        usage = "Use for full vault audits or migration preparation when complete data export is needed",
-        performance = "Slow on large vaults (1-5s for 10k+ notes), combines multiple analyses",
-        related = ["full_health_analysis", "export_vault_stats", "export_health_report"],
-        examples = ["format: json", "format: csv"]
-    )]
+//     #[tool(
+//         description = "Export comprehensive vault analysis combining health, stats, links, and clusters",
+//         usage = "Use for full vault audits or migration preparation when complete data export is needed",
+//         performance = "Slow on large vaults (1-5s for 10k+ notes), combines multiple analyses",
+//         related = ["full_health_analysis", "export_vault_stats", "export_health_report"],
+//         examples = ["format: json", "format: csv"]
+//     )]
     async fn export_analysis_report(&self, format: String) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = ExportTools::new(manager);
@@ -1968,17 +1968,17 @@ impl ObsidianMcpServer {
     // ==================== Relationship Operations ====================
 
     /// Suggest files to link
-    #[tool(
-        description = "AI-powered link suggestions for a note (returns top N candidates with reasoning)",
-        usage = "Use to improve vault connectivity and discover non-obvious relationships. Analyzes content similarity, link patterns, and graph structure. ML-based, slower than simple queries.",
-        performance = "200ms-2s depending on vault size. Uses TF-IDF + graph features. Consider limit parameter for faster results.",
-        related = ["recommend_related", "get_dead_end_notes", "get_related_notes"],
-        examples = [
-            "file: daily/2024-01-15.md, limit: 5",
-            "file: projects/research.md, limit: 10",
-            "file: index.md (default limit: 5)"
-        ]
-    )]
+//     #[tool(
+//         description = "AI-powered link suggestions for a note (returns top N candidates with reasoning)",
+//         usage = "Use to improve vault connectivity and discover non-obvious relationships. Analyzes content similarity, link patterns, and graph structure. ML-based, slower than simple queries.",
+//         performance = "200ms-2s depending on vault size. Uses TF-IDF + graph features. Consider limit parameter for faster results.",
+//         related = ["recommend_related", "get_dead_end_notes", "get_related_notes"],
+//         examples = [
+//             "file: daily/2024-01-15.md, limit: 5",
+//             "file: projects/research.md, limit: 10",
+//             "file: index.md (default limit: 5)"
+//         ]
+//     )]
     async fn suggest_links(
         &self,
         file: String,
@@ -2004,17 +2004,17 @@ impl ObsidianMcpServer {
     }
 
     /// Get link strength between two files
-    #[tool(
-        description = "Calculate connection strength between two notes (0.0-1.0 score based on multiple factors)",
-        usage = "Use to validate relationship importance or prioritize link maintenance. Considers direct links, shared links, content similarity, and co-citation.",
-        performance = "Fast (<50ms typical), cached graph traversal.",
-        related = ["suggest_links", "get_related_notes", "recommend_related"],
-        examples = [
-            "source: index.md, target: concepts/foo.md",
-            "source: daily/2024-01-15.md, target: projects/research.md",
-            "source: MOC.md, target: archive/old-note.md"
-        ]
-    )]
+//     #[tool(
+//         description = "Calculate connection strength between two notes (0.0-1.0 score based on multiple factors)",
+//         usage = "Use to validate relationship importance or prioritize link maintenance. Considers direct links, shared links, content similarity, and co-citation.",
+//         performance = "Fast (<50ms typical), cached graph traversal.",
+//         related = ["suggest_links", "get_related_notes", "recommend_related"],
+//         examples = [
+//             "source: index.md, target: concepts/foo.md",
+//             "source: daily/2024-01-15.md, target: projects/research.md",
+//             "source: MOC.md, target: archive/old-note.md"
+//         ]
+//     )]
     async fn get_link_strength(
         &self,
         source: String,
@@ -2041,15 +2041,15 @@ impl ObsidianMcpServer {
     ///
     /// Ranks notes by graph centrality metrics: betweenness, closeness, and eigenvector.
     /// This identifies key notes beyond simple link counts.
-    #[tool(
-        description = "Rank all notes by graph centrality metrics (betweenness, closeness, eigenvector)",
-        usage = "Use for identifying key notes beyond simple link counts. Betweenness identifies bridge notes, closeness finds accessible notes, eigenvector reveals influence. More sophisticated than get_hub_notes.",
-        performance = "Computationally expensive on large vaults. O(V³) for betweenness. May take several seconds for >1000 notes.",
-        related = ["get_hub_notes", "explain_vault", "get_link_strength"],
-        examples = [
-            "get_centrality_ranking() // Returns all notes ranked by multiple centrality metrics"
-        ]
-    )]
+//     #[tool(
+//         description = "Rank all notes by graph centrality metrics (betweenness, closeness, eigenvector)",
+//         usage = "Use for identifying key notes beyond simple link counts. Betweenness identifies bridge notes, closeness finds accessible notes, eigenvector reveals influence. More sophisticated than get_hub_notes.",
+//         performance = "Computationally expensive on large vaults. O(V³) for betweenness. May take several seconds for >1000 notes.",
+//         related = ["get_hub_notes", "explain_vault", "get_link_strength"],
+//         examples = [
+//             "get_centrality_ranking() // Returns all notes ranked by multiple centrality metrics"
+//         ]
+//     )]
     async fn get_centrality_ranking(&self) -> McpResult<serde_json::Value> {
         let (vault_name, manager) = self.get_vault_pair().await?;
         let tools = RelationshipTools::new(manager);
@@ -2099,7 +2099,7 @@ impl ObsidianMcpServer {
     // ==================== Resources (OFM Knowledge Injection) ====================
 
     /// Complete Obsidian Flavored Markdown syntax guide
-    #[resource("obsidian://syntax/complete-guide")]
+//     #[resource("obsidian://syntax/complete-guide")]
     async fn ofm_complete_guide_resource(
         &self,
         _uri: String,
@@ -2109,7 +2109,7 @@ impl ObsidianMcpServer {
     }
 
     /// Quick reference for Obsidian Flavored Markdown
-    #[resource("obsidian://syntax/quick-ref")]
+//     #[resource("obsidian://syntax/quick-ref")]
     async fn ofm_quick_reference_resource(
         &self,
         _uri: String,
@@ -2119,7 +2119,7 @@ impl ObsidianMcpServer {
     }
 
     /// Example note demonstrating all OFM features
-    #[resource("obsidian://examples/sample-note")]
+//     #[resource("obsidian://examples/sample-note")]
     async fn ofm_example_note_resource(
         &self,
         _uri: String,
@@ -2134,13 +2134,13 @@ impl ObsidianMcpServer {
     ///
     /// Parses an obsidian:// URL to determine the target vault name and file path.
     /// Supports both open?vault=... and vault/VaultName/Path formats.
-    #[tool(
-        description = "Resolve a cross-vault link (obsidian:// URL) to determine the target vault name and file path",
-        usage = "Use for unified multi-vault knowledge retrieval when encountering a CrossVaultLink. Parses obsidian://open?vault=... or obsidian://vault/... URIs",
-        performance = "Instant (<1ms), string parsing only",
-        related = ["get_active_vault", "set_active_vault", "read_note"],
-        examples = ["resolve_cross_vault_link(uri='obsidian://vault/MyOtherVault/MyNote')"]
-    )]
+//     #[tool(
+//         description = "Resolve a cross-vault link (obsidian:// URL) to determine the target vault name and file path",
+//         usage = "Use for unified multi-vault knowledge retrieval when encountering a CrossVaultLink. Parses obsidian://open?vault=... or obsidian://vault/... URIs",
+//         performance = "Instant (<1ms), string parsing only",
+//         related = ["get_active_vault", "set_active_vault", "read_note"],
+//         examples = ["resolve_cross_vault_link(uri='obsidian://vault/MyOtherVault/MyNote')"]
+//     )]
     async fn resolve_cross_vault_link(&self, uri: String) -> McpResult<serde_json::Value> {
         let (vault, file) = turbovault_tools::parse_obsidian_uri(&uri).ok_or_else(|| {
             McpError::invalid_request(format!("Invalid or unsupported obsidian URI: {}", uri))
@@ -2160,13 +2160,13 @@ impl ObsidianMcpServer {
     ///
     /// Returns the full guide covering all supported OFM features including wikilinks,
     /// embeds, block references, callouts, and more.
-    #[tool(
-        description = "Get complete Obsidian Flavored Markdown syntax guide covering all OFM features",
-        usage = "Use before writing notes to ensure correct syntax, or as reference for OFM extensions. Prefer resource obsidian://syntax/complete-guide if client supports resources",
-        performance = "Instant, returns static documentation",
-        related = ["get_ofm_quick_ref", "get_ofm_examples"],
-        examples = ["get_ofm_syntax_guide()"]
-    )]
+//     #[tool(
+//         description = "Get complete Obsidian Flavored Markdown syntax guide covering all OFM features",
+//         usage = "Use before writing notes to ensure correct syntax, or as reference for OFM extensions. Prefer resource obsidian://syntax/complete-guide if client supports resources",
+//         performance = "Instant, returns static documentation",
+//         related = ["get_ofm_quick_ref", "get_ofm_examples"],
+//         examples = ["get_ofm_syntax_guide()"]
+//     )]
     async fn get_ofm_syntax_guide(&self) -> McpResult<serde_json::Value> {
         let guide = crate::resources::OFM_SYNTAX_GUIDE.to_string();
 
@@ -2193,13 +2193,13 @@ impl ObsidianMcpServer {
     /// Get condensed OFM cheat sheet
     ///
     /// Provides common patterns and best practices in a lightweight format.
-    #[tool(
-        description = "Get condensed OFM cheat sheet with common patterns and best practices",
-        usage = "Use for quick syntax reminders during note writing. More concise than full guide. Prefer resource obsidian://syntax/quick-ref if client supports resources",
-        performance = "Instant, returns static documentation",
-        related = ["get_ofm_syntax_guide", "get_ofm_examples"],
-        examples = ["get_ofm_quick_ref()"]
-    )]
+//     #[tool(
+//         description = "Get condensed OFM cheat sheet with common patterns and best practices",
+//         usage = "Use for quick syntax reminders during note writing. More concise than full guide. Prefer resource obsidian://syntax/quick-ref if client supports resources",
+//         performance = "Instant, returns static documentation",
+//         related = ["get_ofm_syntax_guide", "get_ofm_examples"],
+//         examples = ["get_ofm_quick_ref()"]
+//     )]
     async fn get_ofm_quick_ref(&self) -> McpResult<serde_json::Value> {
         let quick_ref = crate::resources::OFM_QUICK_REFERENCE.to_string();
 
@@ -2225,13 +2225,13 @@ impl ObsidianMcpServer {
     /// Get comprehensive example note demonstrating ALL OFM features
     ///
     /// Includes real-world patterns for daily notes, Zettelkasten, and MOCs.
-    #[tool(
-        description = "Get comprehensive example note demonstrating ALL OFM features with real-world patterns",
-        usage = "Use as reference when creating complex notes or learning OFM syntax by example. Shows daily notes, Zettelkasten, and MOC patterns. Prefer resource obsidian://examples/sample-note if client supports resources",
-        performance = "Instant, returns static example note",
-        related = ["get_ofm_syntax_guide", "get_ofm_quick_ref"],
-        examples = ["get_ofm_examples()"]
-    )]
+//     #[tool(
+//         description = "Get comprehensive example note demonstrating ALL OFM features with real-world patterns",
+//         usage = "Use as reference when creating complex notes or learning OFM syntax by example. Shows daily notes, Zettelkasten, and MOC patterns. Prefer resource obsidian://examples/sample-note if client supports resources",
+//         performance = "Instant, returns static example note",
+//         related = ["get_ofm_syntax_guide", "get_ofm_quick_ref"],
+//         examples = ["get_ofm_examples()"]
+//     )]
     async fn get_ofm_examples(&self) -> McpResult<serde_json::Value> {
         let examples = crate::resources::OFM_EXAMPLE_NOTE.to_string();
 
@@ -2336,13 +2336,13 @@ impl ObsidianMcpServer {
     ///
     /// Analyzes readability, structure, completeness, and staleness.
     /// Provides a score (0-100) per dimension and actionable recommendations.
-    #[tool(
-        description = "Evaluate note quality across readability, structure, completeness, and staleness dimensions (0-100 score per dimension plus composite)",
-        usage = "Use to assess individual note quality and get specific improvement recommendations. Examines heading hierarchy, link density, vocabulary diversity, metadata completeness, and modification recency",
-        performance = "Fast (<100ms per note). Parses content and checks graph for backlinks",
-        related = ["vault_quality_report", "find_stale_notes", "full_health_analysis"],
-        examples = ["evaluate_note_quality(path='projects/research.md')"]
-    )]
+//     #[tool(
+//         description = "Evaluate note quality across readability, structure, completeness, and staleness dimensions (0-100 score per dimension plus composite)",
+//         usage = "Use to assess individual note quality and get specific improvement recommendations. Examines heading hierarchy, link density, vocabulary diversity, metadata completeness, and modification recency",
+//         performance = "Fast (<100ms per note). Parses content and checks graph for backlinks",
+//         related = ["vault_quality_report", "find_stale_notes", "full_health_analysis"],
+//         examples = ["evaluate_note_quality(path='projects/research.md')"]
+//     )]
     async fn evaluate_note_quality(&self, path: String) -> McpResult<serde_json::Value> {
         let start = std::time::Instant::now();
         let (vault_name, manager) = self.get_vault_pair().await?;
@@ -2362,13 +2362,13 @@ impl ObsidianMcpServer {
     ///
     /// Evaluates all notes in the vault and provides aggregate metrics,
     /// score distribution, and a list of lowest quality notes.
-    #[tool(
-        description = "Generate vault-wide quality report with score distribution, dimension averages, lowest/highest quality notes, and recommendations",
-        usage = "Use for vault-wide quality assessment. Identifies notes needing improvement and provides aggregate metrics across readability, structure, completeness, and staleness",
-        performance = "Moderate to slow (500ms-5s depending on vault size). Evaluates all notes",
-        related = ["evaluate_note_quality", "find_stale_notes", "full_health_analysis", "explain_vault"],
-        examples = ["vault_quality_report(bottom_n=20)"]
-    )]
+//     #[tool(
+//         description = "Generate vault-wide quality report with score distribution, dimension averages, lowest/highest quality notes, and recommendations",
+//         usage = "Use for vault-wide quality assessment. Identifies notes needing improvement and provides aggregate metrics across readability, structure, completeness, and staleness",
+//         performance = "Moderate to slow (500ms-5s depending on vault size). Evaluates all notes",
+//         related = ["evaluate_note_quality", "find_stale_notes", "full_health_analysis", "explain_vault"],
+//         examples = ["vault_quality_report(bottom_n=20)"]
+//     )]
     async fn vault_quality_report(&self, bottom_n: Option<usize>) -> McpResult<serde_json::Value> {
         let start = std::time::Instant::now();
         let (vault_name, manager) = self.get_vault_pair().await?;
@@ -2391,13 +2391,13 @@ impl ObsidianMcpServer {
     /// Find stale notes needing review
     ///
     /// Identifies notes that haven't been updated recently.
-    #[tool(
-        description = "Find notes that have not been updated recently, sorted by staleness (most stale first)",
-        usage = "Use to identify neglected content that may need review, updating, or archiving. Configurable threshold in days and result limit",
-        performance = "Moderate (200ms-2s depending on vault size). Checks file modification times",
-        related = ["evaluate_note_quality", "vault_quality_report", "query_metadata"],
-        examples = ["find_stale_notes(threshold_days=90, limit=20)"]
-    )]
+//     #[tool(
+//         description = "Find notes that have not been updated recently, sorted by staleness (most stale first)",
+//         usage = "Use to identify neglected content that may need review, updating, or archiving. Configurable threshold in days and result limit",
+//         performance = "Moderate (200ms-2s depending on vault size). Checks file modification times",
+//         related = ["evaluate_note_quality", "vault_quality_report", "query_metadata"],
+//         examples = ["find_stale_notes(threshold_days=90, limit=20)"]
+//     )]
     async fn find_stale_notes(
         &self,
         threshold_days: Option<u64>,
@@ -2427,13 +2427,13 @@ impl ObsidianMcpServer {
     /// Find notes semantically similar to a query
     ///
     /// Uses TF-IDF cosine similarity to find conceptual matches beyond keyword overlap.
-    #[tool(
-        description = "Find notes semantically similar to a query using TF-IDF cosine similarity (finds conceptual matches beyond exact keyword overlap)",
-        usage = "Use when keyword search returns too few results or you want conceptual similarity. Returns similarity scores (0-1) and shared terms for explainability. More sophisticated than keyword search",
-        performance = "Moderate (<500ms for 10k notes). Builds TF-IDF vectors on first call, cached for subsequent queries",
-        related = ["search", "find_similar_notes", "recommend_related", "advanced_search"],
-        examples = ["semantic_search(query='distributed systems architecture', limit=10)"]
-    )]
+//     #[tool(
+//         description = "Find notes semantically similar to a query using TF-IDF cosine similarity (finds conceptual matches beyond exact keyword overlap)",
+//         usage = "Use when keyword search returns too few results or you want conceptual similarity. Returns similarity scores (0-1) and shared terms for explainability. More sophisticated than keyword search",
+//         performance = "Moderate (<500ms for 10k notes). Builds TF-IDF vectors on first call, cached for subsequent queries",
+//         related = ["search", "find_similar_notes", "recommend_related", "advanced_search"],
+//         examples = ["semantic_search(query='distributed systems architecture', limit=10)"]
+//     )]
     async fn semantic_search(
         &self,
         query: String,
@@ -2458,13 +2458,13 @@ impl ObsidianMcpServer {
     /// Find notes similar to a specific note
     ///
     /// Identifies notes with similar content using TF-IDF cosine similarity.
-    #[tool(
-        description = "Find notes most similar in content to a specific note using TF-IDF cosine similarity",
-        usage = "Use to discover related notes for linking, find candidates for merging, or identify thematic clusters. More content-aware than graph-based get_related_notes",
-        performance = "Moderate (<500ms for 10k notes). Uses pre-built TF-IDF vectors",
-        related = ["semantic_search", "recommend_related", "get_related_notes", "find_duplicates"],
-        examples = ["find_similar_notes(path='projects/research.md', limit=10)"]
-    )]
+//     #[tool(
+//         description = "Find notes most similar in content to a specific note using TF-IDF cosine similarity",
+//         usage = "Use to discover related notes for linking, find candidates for merging, or identify thematic clusters. More content-aware than graph-based get_related_notes",
+//         performance = "Moderate (<500ms for 10k notes). Uses pre-built TF-IDF vectors",
+//         related = ["semantic_search", "recommend_related", "get_related_notes", "find_duplicates"],
+//         examples = ["find_similar_notes(path='projects/research.md', limit=10)"]
+//     )]
     async fn find_similar_notes(
         &self,
         path: String,
@@ -2491,13 +2491,13 @@ impl ObsidianMcpServer {
     /// Find near-duplicate notes across the vault
     ///
     /// Uses SimHash fingerprinting and TF-IDF cosine similarity for fast and precise detection.
-    #[tool(
-        description = "Find near-duplicate notes across vault using SimHash fingerprinting and TF-IDF cosine similarity verification",
-        usage = "Use to identify redundant content, merge candidates, or detect copied notes. Default threshold 0.8 catches close duplicates; lower to 0.6 for looser matching. Two-stage: fast SimHash filtering then precise verification",
-        performance = "Moderate (<2s for 10k notes). SimHash O(N^2) candidate filtering then TF-IDF verification",
-        related = ["compare_notes", "find_similar_notes", "diff_notes"],
-        examples = ["find_duplicates(threshold=0.8, limit=20)"]
-    )]
+//     #[tool(
+//         description = "Find near-duplicate notes across vault using SimHash fingerprinting and TF-IDF cosine similarity verification",
+//         usage = "Use to identify redundant content, merge candidates, or detect copied notes. Default threshold 0.8 catches close duplicates; lower to 0.6 for looser matching. Two-stage: fast SimHash filtering then precise verification",
+//         performance = "Moderate (<2s for 10k notes). SimHash O(N^2) candidate filtering then TF-IDF verification",
+//         related = ["compare_notes", "find_similar_notes", "diff_notes"],
+//         examples = ["find_duplicates(threshold=0.8, limit=20)"]
+//     )]
     async fn find_duplicates(
         &self,
         threshold: Option<f64>,
@@ -2525,13 +2525,13 @@ impl ObsidianMcpServer {
     /// Compare two specific notes for similarity
     ///
     /// Provides similarity score, shared terms, and merge recommendations.
-    #[tool(
-        description = "Compare two specific notes showing similarity score, shared terms, diff summary, and actionable recommendation",
-        usage = "Use to assess whether two notes should be merged, linked, or kept separate. Returns similarity score (0-1), shared vocabulary, line-level diff statistics, and a recommendation",
-        performance = "Moderate (<500ms). Builds TF-IDF vectors and computes diff",
-        related = ["find_duplicates", "diff_notes", "find_similar_notes"],
-        examples = ["compare_notes(left='projects/plan-v1.md', right='projects/plan-v2.md')"]
-    )]
+//     #[tool(
+//         description = "Compare two specific notes showing similarity score, shared terms, diff summary, and actionable recommendation",
+//         usage = "Use to assess whether two notes should be merged, linked, or kept separate. Returns similarity score (0-1), shared vocabulary, line-level diff statistics, and a recommendation",
+//         performance = "Moderate (<500ms). Builds TF-IDF vectors and computes diff",
+//         related = ["find_duplicates", "diff_notes", "find_similar_notes"],
+//         examples = ["compare_notes(left='projects/plan-v1.md', right='projects/plan-v2.md')"]
+//     )]
     async fn compare_notes(&self, left: String, right: String) -> McpResult<serde_json::Value> {
         let start = std::time::Instant::now();
         let (vault_name, manager) = self.get_vault_pair().await?;
@@ -2552,13 +2552,13 @@ impl ObsidianMcpServer {
 
     // ─── AUDIT TOOLS ─────────────────────────────────────────────────
 
-    #[tool(
-        description = "View operation history for the active vault with optional filters by path, operation type (CREATE/UPDATE/DELETE/MOVE), and result limit",
-        usage = "Use to review what changed in the vault, when, and get operation IDs for rollback. Returns chronological entries (newest first) with operation IDs, timestamps, paths, and content hashes",
-        performance = "Fast (<100ms typical). Reads from append-only JSONL log file",
-        related = ["rollback_note", "rollback_preview", "audit_stats", "diff_note_version"],
-        examples = ["audit_log()", "audit_log(path='projects/', limit=20)", "audit_log(operation='DELETE')"]
-    )]
+//     #[tool(
+//         description = "View operation history for the active vault with optional filters by path, operation type (CREATE/UPDATE/DELETE/MOVE), and result limit",
+//         usage = "Use to review what changed in the vault, when, and get operation IDs for rollback. Returns chronological entries (newest first) with operation IDs, timestamps, paths, and content hashes",
+//         performance = "Fast (<100ms typical). Reads from append-only JSONL log file",
+//         related = ["rollback_note", "rollback_preview", "audit_stats", "diff_note_version"],
+//         examples = ["audit_log()", "audit_log(path='projects/', limit=20)", "audit_log(operation='DELETE')"]
+//     )]
     async fn audit_log(
         &self,
         path: Option<String>,
@@ -2603,13 +2603,13 @@ impl ObsidianMcpServer {
         .to_json()
     }
 
-    #[tool(
-        description = "Preview what a rollback would change without applying it (dry run). Shows unified diff between current content and rollback target",
-        usage = "Always use before rollback_note to verify the change. Returns whether the rollback would create, delete, or modify the file, plus a diff preview",
-        performance = "Fast (<50ms). Read-only operation",
-        related = ["rollback_note", "audit_log", "diff_note_version"],
-        examples = ["rollback_preview(operation_id='abc-123-def-456')"]
-    )]
+//     #[tool(
+//         description = "Preview what a rollback would change without applying it (dry run). Shows unified diff between current content and rollback target",
+//         usage = "Always use before rollback_note to verify the change. Returns whether the rollback would create, delete, or modify the file, plus a diff preview",
+//         performance = "Fast (<50ms). Read-only operation",
+//         related = ["rollback_note", "audit_log", "diff_note_version"],
+//         examples = ["rollback_preview(operation_id='abc-123-def-456')"]
+//     )]
     async fn rollback_preview(&self, operation_id: String) -> McpResult<serde_json::Value> {
         let start = std::time::Instant::now();
         let (vault_name, manager) = self.get_vault_pair().await?;
@@ -2632,13 +2632,13 @@ impl ObsidianMcpServer {
         response.to_json()
     }
 
-    #[tool(
-        description = "Restore a note to its state before a specific operation (identified by operation_id from audit_log)",
-        usage = "Use to undo unwanted changes. The rollback itself is recorded in the audit trail. Use rollback_preview first to verify. Cannot roll back MOVE or ROLLBACK operations",
-        performance = "Moderate (<100ms). Reads snapshot, writes file atomically, records new audit entry",
-        related = ["rollback_preview", "audit_log", "diff_note_version"],
-        examples = ["rollback_note(operation_id='abc-123-def-456')"]
-    )]
+//     #[tool(
+//         description = "Restore a note to its state before a specific operation (identified by operation_id from audit_log)",
+//         usage = "Use to undo unwanted changes. The rollback itself is recorded in the audit trail. Use rollback_preview first to verify. Cannot roll back MOVE or ROLLBACK operations",
+//         performance = "Moderate (<100ms). Reads snapshot, writes file atomically, records new audit entry",
+//         related = ["rollback_preview", "audit_log", "diff_note_version"],
+//         examples = ["rollback_note(operation_id='abc-123-def-456')"]
+//     )]
     async fn rollback_note(&self, operation_id: String) -> McpResult<serde_json::Value> {
         let start = std::time::Instant::now();
         let (vault_name, manager) = self.get_vault_pair().await?;
@@ -2676,13 +2676,13 @@ impl ObsidianMcpServer {
         .to_json()
     }
 
-    #[tool(
-        description = "Get audit trail statistics including operation counts by type, total snapshot storage used, and time range of recorded operations",
-        usage = "Use for vault auditing overview. Shows operation breakdown (CREATE/UPDATE/DELETE/MOVE) and total snapshot disk usage",
-        performance = "Fast (<50ms). Aggregates from log file",
-        related = ["audit_log", "explain_vault", "vault_quality_report"],
-        examples = ["audit_stats()"]
-    )]
+//     #[tool(
+//         description = "Get audit trail statistics including operation counts by type, total snapshot storage used, and time range of recorded operations",
+//         usage = "Use for vault auditing overview. Shows operation breakdown (CREATE/UPDATE/DELETE/MOVE) and total snapshot disk usage",
+//         performance = "Fast (<50ms). Aggregates from log file",
+//         related = ["audit_log", "explain_vault", "vault_quality_report"],
+//         examples = ["audit_stats()"]
+//     )]
     async fn audit_stats(&self) -> McpResult<serde_json::Value> {
         let start = std::time::Instant::now();
         let vault_name = self.get_active_vault_name().await?;

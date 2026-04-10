@@ -68,6 +68,8 @@ log = { workspace = true }
 simple_logger = "5.0"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+turbomcp-protocol = "3.0.10"
+turbomcp-core = "3.0.10"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }

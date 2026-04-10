@@ -4441,6 +4441,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "turbomcp",
+ "turbomcp-core",
+ "turbomcp-protocol",
  "turbovault-audit",
  "turbovault-core",
  "turbovault-tools",
