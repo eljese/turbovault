@@ -5,13 +5,6 @@ All notable changes to TurboVault will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.3.1] - 2026-04-05
-
-### Changed
-
-- **BatchOperationSchema**: Removed `BatchOperationInput` wrapper and derived `JsonSchema` directly on `BatchOperation` in `turbovault-batch` to fix MCP schema.
-- **batch_execute MCP tool**: Fixed schema generation by using the correctly typed input model (`Vec<BatchOperation>`).
-
 ## [1.3.0] - 2026-03-31
 
 ### Added
